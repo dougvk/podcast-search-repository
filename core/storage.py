@@ -10,6 +10,14 @@ from datetime import datetime
 
 from .video_encoder import VideoEncoder
 
+# Memvid integration for efficient storage and retrieval
+try:
+    from memvid import MemvidEncoder, MemvidRetriever
+    MEMVID_AVAILABLE = True
+except ImportError:
+    MEMVID_AVAILABLE = False
+    logging.warning("Memvid not available. Using fallback storage.")
+
 # Configure logging
 logger = logging.getLogger(__name__)
 
@@ -47,24 +55,93 @@ class StorageResult:
     checksum: str
     error_message: Optional[str] = None
     
+class MetadataIndexer:
+    """Efficient metadata indexing with search capabilities."""
+    
+    def __init__(self, storage_dir: Path):
+        self.storage_dir = storage_dir
+        self.index_file = storage_dir / "metadata_index.json"
+        self.search_index = {}
+        self._load_index()
+    
+    def _load_index(self):
+        """Load search index from disk."""
+        if self.index_file.exists():
+            with open(self.index_file, 'r') as f:
+                self.search_index = json.load(f)
+    
+    def _save_index(self):
+        """Save search index to disk."""
+        with open(self.index_file, 'w') as f:
+            json.dump(self.search_index, f, indent=2)
+    
+    def index_episode(self, episode_id: str, metadata: Dict[str, Any]):
+        """Index episode metadata for fast search."""
+        # Create searchable keywords
+        keywords = set()
+        keywords.add(episode_id.lower())
+        if 'chunks' in metadata:
+            for chunk in metadata['chunks']:
+                if chunk.get('speaker'):
+                    keywords.add(chunk['speaker'].lower())
+                # Add first few words from text for content search
+                text_words = chunk.get('text', '')[:100].lower().split()[:10]
+                keywords.update(text_words)
+        
+        self.search_index[episode_id] = {
+            'keywords': list(keywords),
+            'metadata': metadata,
+            'indexed_at': datetime.now().isoformat()
+        }
+        self._save_index()
+    
+    def search(self, query: str, limit: int = 10) -> List[str]:
+        """Search episodes by query."""
+        query_words = set(query.lower().split())
+        scores = {}
+        
+        for episode_id, data in self.search_index.items():
+            keywords = set(data['keywords'])
+            score = len(query_words.intersection(keywords)) / len(query_words)
+            if score > 0:
+                scores[episode_id] = score
+        
+        return sorted(scores.keys(), key=lambda x: scores[x], reverse=True)[:limit]
+    
 class StorageManager:
     """Robust storage manager with comprehensive encode/decode pipeline."""
     
     def __init__(self, 
                  storage_dir: str = "data/video_libraries",
-                 video_encoder_config: Optional[Dict[str, Any]] = None):
+                 video_encoder_config: Optional[Dict[str, Any]] = None,
+                 use_memvid: bool = True):
         """Initialize StorageManager with error handling and validation."""
         try:
             self.storage_dir = Path(storage_dir)
             self.storage_dir.mkdir(parents=True, exist_ok=True)
             
+            # Create hierarchical directory structure
+            self.episodes_dir = self.storage_dir / "episodes"
+            self.archive_dir = self.storage_dir / "archive"
+            self.temp_dir = self.storage_dir / "temp"
+            
+            for dir_path in [self.episodes_dir, self.archive_dir, self.temp_dir]:
+                dir_path.mkdir(exist_ok=True)
+            
             # Initialize video encoder with configuration
             encoder_config = video_encoder_config or {}
-            encoder_config['output_dir'] = str(self.storage_dir)
+            encoder_config['output_dir'] = str(self.episodes_dir)
             self.video_encoder = VideoEncoder(**encoder_config)
             
-            # Initialize metadata tracking
+            # Initialize memvid if available
+            self.use_memvid = use_memvid and MEMVID_AVAILABLE
+            if self.use_memvid:
+                self.memvid_encoder = MemvidEncoder()
+                logger.info("Memvid integration enabled")
+            
+            # Initialize metadata tracking and indexing
             self.metadata_file = self.storage_dir / "storage_metadata.json"
+            self.indexer = MetadataIndexer(self.storage_dir)
             self._load_metadata()
             
             logger.info(f"StorageManager initialized with directory: {self.storage_dir}")
@@ -72,6 +149,14 @@ class StorageManager:
         except Exception as e:
             logger.error(f"Failed to initialize StorageManager: {str(e)}")
             raise
+    
+    def _get_episode_path(self, episode_id: str) -> Path:
+        """Get hierarchical path for episode based on date/ID."""
+        # Create year/month structure for organization
+        date_str = datetime.now().strftime("%Y/%m")
+        episode_dir = self.episodes_dir / date_str
+        episode_dir.mkdir(parents=True, exist_ok=True)
+        return episode_dir / f"{episode_id}.mp4"
     
     def _load_metadata(self):
         """Load metadata from storage."""
@@ -169,7 +254,7 @@ class StorageManager:
         return errors
     
     def encode_chunks_to_video(self, chunks: List[Chunk]) -> StorageResult:
-        """Encode chunks to video with comprehensive error handling and validation."""
+        """Encode chunks to video with memvid integration and validation."""
         start_time = time.time()
         
         try:
@@ -192,7 +277,7 @@ class StorageManager:
                     error_message=error_msg
                 )
             
-            # Extract episode ID (assuming all chunks have same episode_id)
+            # Extract episode ID
             episode_id = chunks[0].episode_id
             
             # Verify all chunks belong to same episode
@@ -211,53 +296,51 @@ class StorageManager:
                     error_message=error_msg
                 )
             
-            # Calculate checksum for integrity verification
-            checksum = self._calculate_checksum(chunks)
+            # Use hierarchical path organization  
+            video_path = str(self._get_episode_path(episode_id))
+            index_path = str(Path(video_path).with_suffix('_index.json'))
             
-            # Convert chunks to text list for encoder
+            # Calculate metrics
             text_chunks = [chunk.text for chunk in chunks]
             text_size = sum(len(text.encode('utf-8')) for text in text_chunks)
+            checksum = self._calculate_checksum(chunks)
             
-            # Encode using video encoder with error recovery
+            # Use memvid if available, fallback to video encoder
             try:
-                encode_result = self.video_encoder.encode(text_chunks, episode_id)
+                if self.use_memvid:
+                    # Memvid encoding - optimized for compression
+                    self.memvid_encoder.add_chunks(text_chunks)
+                    self.memvid_encoder.build_video(video_path, index_path, fps=30, frame_size=512)
+                    success = Path(video_path).exists() and Path(index_path).exists()
+                else:
+                    # Fallback encoding
+                    encode_result = self.video_encoder.encode(text_chunks, episode_id)
+                    video_path = encode_result['video_path']
+                    index_path = encode_result['index_path']
+                    success = Path(video_path).exists()
+                
+                if not success:
+                    raise Exception("Output files not created")
+                    
             except Exception as e:
-                error_msg = f"Video encoding failed: {str(e)}"
+                error_msg = f"Encoding failed: {str(e)}"
                 logger.error(error_msg)
                 return StorageResult(
-                    success=False,
-                    video_path="",
-                    index_path="",
-                    chunk_count=len(chunks),
-                    processing_time=time.time() - start_time,
-                    video_size_bytes=0,
-                    text_size_bytes=text_size,
-                    checksum=checksum,
-                    error_message=error_msg
+                    success=False, video_path=video_path, index_path=index_path,
+                    chunk_count=len(chunks), processing_time=time.time() - start_time,
+                    video_size_bytes=0, text_size_bytes=text_size,
+                    checksum=checksum, error_message=error_msg
                 )
             
-            # Verify output files exist
-            video_path = encode_result['video_path']
-            index_path = encode_result['index_path']
-            
-            if not Path(video_path).exists():
-                error_msg = f"Video file was not created: {video_path}"
-                logger.error(error_msg)
-                return StorageResult(
-                    success=False,
-                    video_path=video_path,
-                    index_path=index_path,
-                    chunk_count=len(chunks),
-                    processing_time=time.time() - start_time,
-                    video_size_bytes=0,
-                    text_size_bytes=text_size,
-                    checksum=checksum,
-                    error_message=error_msg
-                )
-            
-            # Update metadata
-            video_size = encode_result.get('video_size_bytes', 0)
+            # Update metadata and index
+            video_size = Path(video_path).stat().st_size
+            metadata = {
+                'episode_id': episode_id, 'video_path': video_path, 'index_path': index_path,
+                'chunk_count': len(chunks), 'checksum': checksum, 'chunks': chunks,
+                'created': datetime.now().isoformat(), 'video_size_bytes': video_size
+            }
             self._update_episode_metadata(episode_id, chunks, video_path, index_path, checksum)
+            self.indexer.index_episode(episode_id, metadata)
             
             processing_time = time.time() - start_time
             
@@ -291,25 +374,29 @@ class StorageManager:
             )
     
     def decode_chunks_from_video(self, video_path: str) -> List[Chunk]:
-        """Decode chunks from video with error recovery and integrity verification."""
+        """Decode chunks from video with memvid integration."""
         try:
-            logger.info(f"Starting decode operation for video: {video_path}")
+            logger.info(f"Decoding video: {video_path}")
             
-            # Validate input files
             video_file = Path(video_path)
             if not video_file.exists():
                 raise FileNotFoundError(f"Video file not found: {video_path}")
             
-            # Determine index path
-            index_path = str(video_file.parent / f"{video_file.stem}_index.json")
+            index_path = str(video_file.with_suffix('_index.json'))
             if not Path(index_path).exists():
                 raise FileNotFoundError(f"Index file not found: {index_path}")
             
-            # Decode using video encoder
-            text_chunks = self.video_encoder.decode(video_path, index_path)
+            # Use memvid if available
+            if self.use_memvid:
+                retriever = MemvidRetriever(video_path, index_path)
+                # Get all chunks from the video - using a broad search to get everything
+                search_results = retriever.search("", top_k=10000)  # Large number to get all
+                text_chunks = [chunk for chunk, score in search_results]
+            else:
+                text_chunks = self.video_encoder.decode(video_path, index_path)
             
-            # Get episode metadata for reconstruction
-            episode_id = video_file.stem
+            # Reconstruct Chunk objects from metadata
+            episode_id = video_file.stem.replace('_index', '')
             episode_metadata = self.metadata.get("episodes", {}).get(episode_id, {})
             chunk_metadata = episode_metadata.get("chunks", [])
             
@@ -498,6 +585,49 @@ class StorageManager:
         except Exception as e:
             logger.error(f"Failed to organize video library: {str(e)}")
             raise
+    
+    def search_episodes(self, query: str, limit: int = 10) -> List[Dict[str, Any]]:
+        """Search episodes using metadata indexer."""
+        episode_ids = self.indexer.search(query, limit)
+        results = []
+        for episode_id in episode_ids:
+            episode_data = self.metadata.get("episodes", {}).get(episode_id, {})
+            if episode_data:
+                results.append({
+                    'episode_id': episode_id,
+                    'chunk_count': episode_data.get('chunk_count', 0),
+                    'created': episode_data.get('created', ''),
+                    'video_size_bytes': episode_data.get('video_size_bytes', 0)
+                })
+        return results
+    
+    def archive_episode(self, episode_id: str) -> bool:
+        """Move episode to archive directory for lifecycle management."""
+        try:
+            episode_data = self.metadata.get("episodes", {}).get(episode_id)
+            if not episode_data:
+                return False
+            
+            video_path = Path(episode_data['video_path'])
+            index_path = Path(episode_data['index_path'])
+            
+            if video_path.exists():
+                archive_video = self.archive_dir / video_path.name
+                video_path.rename(archive_video)
+                episode_data['video_path'] = str(archive_video)
+                
+            if index_path.exists():
+                archive_index = self.archive_dir / index_path.name
+                index_path.rename(archive_index)
+                episode_data['index_path'] = str(archive_index)
+                
+            self._save_metadata()
+            logger.info(f"Archived episode: {episode_id}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to archive episode {episode_id}: {e}")
+            return False
 
 class VideoStorage(StorageManager):
     """Legacy compatibility class - redirects to StorageManager."""
