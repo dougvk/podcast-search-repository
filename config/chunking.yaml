@@ -1,0 +1,197 @@
+# Chunking Configuration for Podcast Transcripts
+
+# Base Chunking Strategy
+strategy:
+  # Primary chunking method
+  method: "conversation_aware"  # Options: sentence, paragraph, conversation_aware, fixed_size
+  
+  # Chunk size parameters
+  target_chunk_size: 300  # Target number of words per chunk
+  min_chunk_size: 100  # Minimum words to form a valid chunk
+  max_chunk_size: 500  # Maximum words before forced split
+  
+  # Overlap settings for context preservation
+  overlap_size: 50  # Number of words to overlap between chunks
+  overlap_strategy: "sentence_boundary"  # Options: word, sentence_boundary, paragraph
+
+# Conversation-Aware Chunking
+conversation:
+  # Speaker turn handling
+  preserve_speaker_turns: true  # Never split within a speaker's turn
+  min_turn_length: 20  # Minimum words to preserve a turn
+  
+  # Turn boundary detection
+  speaker_change_markers:
+    - ":"  # "Speaker: dialogue"
+    - ">"  # "> Speaker dialogue"
+    - "-"  # "- Speaker dialogue"
+  
+  # Cross-speaker context
+  include_speaker_context: true  # Include speaker names in chunks
+  context_format: "[{speaker}]: {text}"  # Format for speaker attribution
+  
+  # Turn grouping
+  group_short_turns: true  # Combine very short consecutive turns
+  max_turns_per_chunk: 5  # Maximum number of speaker turns in one chunk
+
+# Quality Control
+quality:
+  # Content filtering
+  min_meaningful_words: 5  # Minimum meaningful words (exclude filler)
+  max_filler_ratio: 0.3  # Maximum ratio of filler words
+  
+  # Filler word detection
+  filler_words:
+    - "um"
+    - "uh"
+    - "like"
+    - "you know"
+    - "basically"
+    - "actually"
+    - "literally"
+  
+  # Quality scoring
+  compute_quality_score: true  # Calculate quality metrics for each chunk
+  min_quality_threshold: 0.3  # Minimum quality score to include chunk
+
+# Text Processing
+preprocessing:
+  # Normalization
+  normalize_whitespace: true  # Clean up spacing and line breaks
+  remove_excessive_punctuation: true  # Clean up "???" or "!!!"
+  
+  # Case handling
+  preserve_case: true  # Maintain original capitalization
+  normalize_speaker_names: true  # Consistent speaker name formatting
+  
+  # Special content handling
+  handle_timestamps: true  # Process timestamp markers
+  timestamp_formats:
+    - "\\[\\d{1,2}:\\d{2}(:\\d{2})?\\]"  # [12:34] or [12:34:56]
+    - "\\(\\d{1,2}:\\d{2}(:\\d{2})?\\)"  # (12:34) or (12:34:56)
+  
+  # URL and email handling
+  preserve_urls: true  # Keep URLs intact
+  preserve_emails: true  # Keep email addresses intact
+
+# Language-Specific Settings
+language:
+  # Primary language
+  primary_language: "en"  # ISO 639-1 language code
+  
+  # Sentence boundary detection
+  sentence_tokenizer: "nltk"  # Options: nltk, spacy, simple
+  
+  # Language-specific rules
+  sentence_end_markers: [".", "!", "?", "…"]
+  abbreviation_handling: true  # Handle "Dr.", "Mr.", etc.
+
+# Metadata Preservation
+metadata:
+  # Chunk-level metadata
+  include_chunk_id: true  # Unique identifier for each chunk
+  include_source_info: true  # Episode and position information
+  include_timestamps: true  # Start and end timestamps if available
+  
+  # Context metadata
+  include_surrounding_speakers: true  # Speakers in adjacent chunks
+  include_topic_hints: true  # Detected topic keywords
+  
+  # Quality metadata
+  include_quality_score: true  # Chunk quality metrics
+  include_processing_info: true  # Processing timestamp and version
+
+# Performance Optimization
+performance:
+  # Processing settings
+  batch_processing: true  # Process multiple transcripts in parallel
+  batch_size: 10  # Number of transcripts to process simultaneously
+  
+  # Memory management
+  max_memory_mb: 1000  # Maximum memory usage for chunking
+  stream_large_files: true  # Stream processing for very large transcripts
+  
+  # Caching
+  cache_intermediate_results: true  # Cache preprocessing results
+  cache_directory: "data/chunking_cache"
+
+# Episode-Specific Handling
+episode:
+  # Episode boundary detection
+  detect_episode_boundaries: true  # Identify episode start/end
+  episode_markers:
+    - "welcome to"
+    - "this is episode"
+    - "episode \\d+"
+    - "thanks for listening"
+  
+  # Intro/outro handling
+  skip_intro_outro: false  # Include intro/outro in chunks
+  intro_max_length: 120  # Maximum seconds for intro detection
+  outro_max_length: 60  # Maximum seconds for outro detection
+  
+  # Segment detection
+  detect_segments: true  # Identify topic segments within episodes
+  segment_markers:
+    - "now let's talk about"
+    - "moving on to"
+    - "next topic"
+    - "speaking of"
+
+# Advanced Chunking Options
+advanced:
+  # Semantic chunking
+  use_semantic_boundaries: false  # Use topic modeling for chunking
+  semantic_similarity_threshold: 0.7  # Threshold for topic change
+  
+  # Dynamic chunking
+  adaptive_chunk_size: false  # Adjust chunk size based on content
+  complexity_based_sizing: false  # Larger chunks for complex topics
+  
+  # Cross-episode chunking
+  enable_cross_episode_context: false  # Include context from related episodes
+  max_cross_episode_chunks: 2  # Maximum chunks from other episodes
+
+# Validation and Testing
+validation:
+  # Chunk validation
+  validate_chunk_boundaries: true  # Ensure clean chunk boundaries
+  validate_overlap_consistency: true  # Check overlap correctness
+  
+  # Quality assurance
+  sample_validation_rate: 0.1  # Fraction of chunks to manually validate
+  log_validation_issues: true  # Log problematic chunks
+  
+  # Testing
+  run_chunking_tests: false  # Run unit tests on chunking logic
+  test_data_path: "tests/data/sample_transcripts"
+
+# Output Configuration
+output:
+  # Format settings
+  output_format: "json"  # Options: json, csv, parquet
+  include_raw_text: true  # Include original text in output
+  include_processed_text: true  # Include cleaned text in output
+  
+  # File organization
+  output_directory: "data/processed"
+  filename_pattern: "{episode_id}_chunks.{format}"
+  
+  # Compression
+  compress_output: false  # Compress output files
+  compression_format: "gzip"  # Compression method
+
+# Environment-Specific Overrides
+development:
+  # Development settings
+  target_chunk_size: 200  # Smaller chunks for faster testing
+  batch_size: 5  # Smaller batches for development
+  verbose_logging: true  # Detailed logging for debugging
+  run_validation: true  # Enable all validation checks
+
+production:
+  # Production settings
+  target_chunk_size: 300  # Optimal size for search performance
+  batch_size: 20  # Larger batches for efficiency
+  verbose_logging: false  # Minimal logging for performance
+  compress_output: true  # Save storage space

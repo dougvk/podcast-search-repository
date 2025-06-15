@@ -1,0 +1,240 @@
+# Search Configuration for Podcast Repository
+
+# Core Search Settings
+search:
+  # Default search behavior
+  default_search_type: "hybrid"  # Options: semantic, keyword, hybrid
+  max_results: 50  # Maximum number of results to return
+  min_results: 1  # Minimum results before expanding search
+  
+  # Result ranking
+  ranking_strategy: "hybrid_weighted"  # Options: similarity, hybrid_weighted, temporal, custom
+  
+  # Search timeout
+  timeout_seconds: 30  # Maximum time for search operation
+  enable_partial_results: true  # Return partial results if timeout reached
+
+# Semantic Search Configuration
+semantic:
+  # Similarity settings
+  similarity_metric: "cosine"  # Options: cosine, dot_product, euclidean
+  min_similarity_threshold: 0.3  # Minimum similarity score to include result
+  
+  # Query processing
+  query_expansion: true  # Expand queries with synonyms/related terms
+  query_preprocessing: true  # Apply same preprocessing as chunks
+  
+  # Context handling
+  context_window_size: 2  # Number of surrounding chunks to include
+  max_context_length: 1000  # Maximum context length in characters
+  
+  # Embedding cache
+  cache_query_embeddings: true  # Cache embeddings for common queries
+  max_cached_queries: 1000  # Maximum number of cached query embeddings
+
+# Keyword Search Configuration
+keyword:
+  # Search engine
+  engine: "whoosh"  # Options: whoosh, elasticsearch, simple
+  
+  # Indexing settings
+  analyzer: "standard"  # Text analysis for indexing
+  stemming: true  # Enable word stemming
+  stop_words: true  # Remove common stop words
+  
+  # Query processing
+  fuzzy_matching: true  # Enable fuzzy string matching
+  fuzzy_max_distance: 2  # Maximum edit distance for fuzzy matching
+  phrase_matching: true  # Support quoted phrase searches
+  wildcard_matching: true  # Support * and ? wildcards
+  
+  # Boosting
+  field_boosts:
+    title: 2.0  # Boost matches in episode titles
+    speaker: 1.5  # Boost matches in speaker names
+    content: 1.0  # Base boost for content matches
+
+# Hybrid Search Configuration
+hybrid:
+  # Combination strategy
+  combination_method: "weighted_sum"  # Options: weighted_sum, rrf, linear_combination
+  
+  # Weight settings
+  semantic_weight: 0.7  # Weight for semantic search results
+  keyword_weight: 0.3  # Weight for keyword search results
+  
+  # Result merging
+  merge_strategy: "interleave"  # Options: interleave, semantic_first, keyword_first
+  deduplication: true  # Remove duplicate results
+  
+  # Score normalization
+  normalize_scores: true  # Normalize scores to 0-1 range
+  score_combination: "harmonic_mean"  # Options: arithmetic_mean, harmonic_mean, geometric_mean
+
+# FAISS Index Configuration
+faiss:
+  # Index type
+  index_type: "IndexFlatIP"  # Options: IndexFlatIP, IndexIVFFlat, IndexHNSW
+  
+  # Index parameters
+  nprobe: 10  # Number of clusters to search (for IVF indices)
+  ef_search: 64  # Search parameter for HNSW indices
+  
+  # Memory optimization
+  use_gpu: false  # Enable GPU acceleration if available
+  gpu_memory_fraction: 0.8  # Fraction of GPU memory to use
+  
+  # Index persistence
+  save_index: true  # Save index to disk
+  index_directory: "data/indexes"
+  auto_save_interval: 1000  # Auto-save every N additions
+
+# Result Processing
+results:
+  # Formatting
+  include_metadata: true  # Include episode metadata in results
+  include_timestamps: true  # Include timestamps if available
+  include_speakers: true  # Include speaker information
+  include_context: true  # Include surrounding context
+  
+  # Highlighting
+  enable_highlighting: true  # Highlight matching terms
+  highlight_format: "<mark>{term}</mark>"  # HTML format for highlights
+  max_highlights_per_result: 10  # Maximum highlights per result
+  
+  # Snippet generation
+  snippet_length: 200  # Length of result snippets in characters
+  snippet_strategy: "around_match"  # Options: around_match, beginning, smart
+  
+  # Deduplication
+  deduplicate_results: true  # Remove near-duplicate results
+  similarity_threshold_dedup: 0.9  # Threshold for considering results duplicates
+
+# Filtering and Faceting
+filters:
+  # Episode filtering
+  enable_episode_filter: true  # Allow filtering by episode
+  episode_field: "episode_id"  # Field name for episode filtering
+  
+  # Date filtering
+  enable_date_filter: true  # Allow filtering by date
+  date_field: "episode_date"  # Field name for date filtering
+  date_format: "YYYY-MM-DD"  # Expected date format
+  
+  # Speaker filtering
+  enable_speaker_filter: true  # Allow filtering by speaker
+  speaker_field: "speakers"  # Field name for speaker filtering
+  
+  # Custom filters
+  custom_filters: []  # Additional custom filter definitions
+
+# Performance Optimization
+performance:
+  # Caching
+  enable_result_caching: true  # Cache search results
+  cache_size: 1000  # Maximum number of cached results
+  cache_ttl_minutes: 60  # Time to live for cached results
+  
+  # Parallel processing
+  enable_parallel_search: true  # Enable parallel search processing
+  max_threads: 4  # Maximum number of search threads
+  
+  # Memory management
+  max_memory_mb: 2000  # Maximum memory usage for search
+  gc_interval: 100  # Garbage collection interval (searches)
+
+# Quality Control
+quality:
+  # Result quality
+  min_result_quality: 0.2  # Minimum quality score for results
+  quality_weights:
+    relevance: 0.4  # Weight for relevance scoring
+    freshness: 0.2  # Weight for content freshness
+    completeness: 0.2  # Weight for metadata completeness
+    popularity: 0.2  # Weight for content popularity
+  
+  # Query quality
+  min_query_length: 3  # Minimum query length in characters
+  max_query_length: 500  # Maximum query length in characters
+  
+  # Validation
+  validate_results: true  # Validate result consistency
+  log_quality_issues: true  # Log quality problems
+
+# Analytics and Monitoring
+analytics:
+  # Query tracking
+  track_queries: true  # Track all search queries
+  track_results: true  # Track which results are clicked
+  track_performance: true  # Track search performance metrics
+  
+  # Popular queries
+  maintain_query_stats: true  # Maintain query frequency statistics
+  popular_queries_count: 100  # Number of popular queries to track
+  
+  # Result analytics
+  track_result_clicks: false  # Track which results users click
+  click_tracking_cookie: "search_session"  # Cookie for click tracking
+
+# API Configuration
+api:
+  # Rate limiting
+  enable_rate_limiting: true  # Enable API rate limiting
+  requests_per_minute: 60  # Maximum requests per minute per IP
+  burst_limit: 10  # Burst limit for rate limiting
+  
+  # Response format
+  default_format: "json"  # Default response format
+  supported_formats: ["json", "xml", "csv"]  # Supported response formats
+  
+  # CORS settings
+  enable_cors: true  # Enable CORS headers
+  allowed_origins: ["*"]  # Allowed origins for CORS
+  allowed_methods: ["GET", "POST"]  # Allowed HTTP methods
+
+# Advanced Features
+advanced:
+  # Query expansion
+  auto_completion: true  # Enable query auto-completion
+  suggestion_count: 5  # Number of auto-completion suggestions
+  
+  # Spell checking
+  spell_check: true  # Enable spell checking for queries
+  spell_check_threshold: 0.8  # Confidence threshold for spell correction
+  
+  # Related searches
+  find_related: true  # Find related search terms
+  related_count: 3  # Number of related searches to suggest
+  
+  # Machine learning
+  enable_ml_ranking: false  # Use ML for result ranking
+  ml_model_path: null  # Path to ML ranking model
+
+# Experimental Features
+experimental:
+  # Semantic clustering
+  enable_clustering: false  # Cluster results by topic
+  cluster_count: 5  # Number of clusters to create
+  
+  # Multi-modal search
+  enable_audio_search: false  # Search audio content directly
+  audio_similarity_threshold: 0.6  # Threshold for audio similarity
+  
+  # Personalization
+  enable_personalization: false  # Personalize results based on history
+  personalization_weight: 0.1  # Weight for personalization signals
+
+# Environment-Specific Settings
+development:
+  # Development-specific settings
+  max_results: 20  # Fewer results for development
+  timeout_seconds: 60  # Longer timeout for debugging
+  verbose_logging: true  # Detailed logging
+  cache_disabled: false  # Keep caching for development
+
+production:
+  # Production-specific settings
+  max_results: 50  # Full result set
+  timeout_seconds: 10  # Shorter timeout for production
+  verbose_logging: false  # Minimal logging
+  enable_monitoring: true  # Enable performance monitoring

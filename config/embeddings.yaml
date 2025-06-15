@@ -1,0 +1,134 @@
+# Embedding Configuration for Podcast Search Repository
+
+# Model Selection
+model:
+  # Primary model for semantic embeddings
+  name: "all-MiniLM-L6-v2"
+  # Alternative models to evaluate:
+  # - "all-mpnet-base-v2" (higher quality, slower)
+  # - "paraphrase-multilingual-MiniLM-L12-v2" (multilingual support)
+  # - "sentence-transformers/all-distilroberta-v1" (faster inference)
+  
+  # Model parameters
+  max_seq_length: 256  # Maximum input sequence length
+  normalize_embeddings: true  # L2 normalize embeddings for cosine similarity
+  
+  # Dimension settings
+  embedding_dimension: 384  # Output dimension (model-specific)
+  
+# Processing Configuration
+processing:
+  # Batch processing settings
+  batch_size: 32  # Number of chunks to process simultaneously
+  max_batches_in_memory: 10  # Memory management for large datasets
+  
+  # Performance optimization
+  use_cpu_multiprocessing: true  # Enable multiprocessing for CPU inference
+  num_workers: 4  # Number of worker processes (-1 for auto)
+  
+  # GPU settings (if available)
+  use_gpu: false  # Enable GPU acceleration if available
+  gpu_memory_fraction: 0.8  # Fraction of GPU memory to use
+
+# Caching Configuration
+cache:
+  # Enable caching for computed embeddings
+  enabled: true
+  
+  # Cache storage settings
+  cache_dir: "data/embedding_cache"
+  max_cache_size_gb: 2.0  # Maximum cache size in GB
+  
+  # Cache behavior
+  cache_strategy: "lru"  # Least Recently Used eviction
+  cache_ttl_hours: 168  # Time to live (7 days)
+  
+  # Persistence settings
+  save_to_disk: true  # Persist cache across restarts
+  compress_cache: true  # Compress cached embeddings
+
+# Conversation-Aware Settings
+conversation:
+  # Context window settings
+  use_context_window: true  # Include surrounding context
+  context_window_size: 2  # Number of chunks before/after
+  
+  # Speaker awareness
+  speaker_aware_embeddings: true  # Include speaker information
+  speaker_weight: 0.1  # Weight for speaker information in embedding
+  
+  # Conversation flow
+  preserve_turn_boundaries: true  # Respect speaker turn boundaries
+  cross_turn_overlap: 0.1  # Overlap between speaker turns (0.0-1.0)
+
+# Quality Control
+quality:
+  # Minimum requirements for embedding generation
+  min_chunk_length: 10  # Minimum characters per chunk
+  max_chunk_length: 1000  # Maximum characters per chunk
+  
+  # Quality thresholds
+  min_embedding_norm: 0.1  # Minimum L2 norm for valid embeddings
+  max_similarity_threshold: 0.95  # Flag potential duplicates
+  
+  # Filtering settings
+  filter_empty_chunks: true  # Skip empty or whitespace-only chunks
+  filter_low_quality: true  # Skip chunks with quality issues
+
+# Advanced Settings
+advanced:
+  # Embedding post-processing
+  apply_pca: false  # Apply PCA for dimensionality reduction
+  pca_components: 256  # Target dimensions after PCA
+  
+  # Fine-tuning options
+  use_domain_adaptation: false  # Apply domain-specific adaptation
+  adaptation_dataset: null  # Path to domain adaptation data
+  
+  # Experimental features
+  use_sentence_pooling: "mean"  # Pooling strategy: mean, max, cls
+  apply_layer_norm: false  # Apply layer normalization to embeddings
+
+# Monitoring and Logging
+monitoring:
+  # Performance tracking
+  track_embedding_time: true  # Monitor embedding generation time
+  track_cache_hit_rate: true  # Monitor cache effectiveness
+  
+  # Quality monitoring
+  compute_quality_metrics: true  # Calculate quality scores
+  log_quality_issues: true  # Log problematic embeddings
+  
+  # Progress reporting
+  report_progress: true  # Show progress during batch processing
+  progress_update_interval: 100  # Update frequency (chunks processed)
+
+# Model Evaluation Settings
+evaluation:
+  # Benchmark configuration
+  run_benchmark: false  # Run evaluation benchmark
+  benchmark_dataset: "data/evaluation/benchmark.json"
+  
+  # Evaluation metrics
+  compute_similarity_distribution: true  # Analyze similarity patterns
+  evaluate_clustering: true  # Test clustering quality
+  
+  # Comparison settings
+  compare_models: false  # Compare multiple models
+  comparison_models:
+    - "all-mpnet-base-v2"
+    - "paraphrase-multilingual-MiniLM-L12-v2"
+
+# Environment-Specific Overrides
+development:
+  # Development-specific settings
+  batch_size: 16  # Smaller batches for development
+  cache_enabled: true  # Enable caching for faster iteration
+  verbose_logging: true  # Detailed logging for debugging
+
+production:
+  # Production-specific settings
+  batch_size: 64  # Larger batches for efficiency
+  use_gpu: true  # Enable GPU if available
+  cache_enabled: true  # Enable caching for performance
+  verbose_logging: false  # Minimal logging for performance
