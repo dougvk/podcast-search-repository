@@ -1,0 +1,202 @@
+{
+  "created": "2025-06-15T19:38:07.359858",
+  "episodes": {
+    "performance_test": {
+      "episode_id": "performance_test",
+      "video_path": "data/perf_test/performance_test.mp4",
+      "index_path": "data/perf_test/performance_test_index.json",
+      "chunk_count": 20,
+      "checksum": "7bbf73198fac12890405132521044ddb42bac3f43272d34c02bf4e4147be67d8",
+      "chunks": [
+        {
+          "id": "perf_chunk_000",
+          "start_time": 0.0,
+          "end_time": 5.0,
+          "speaker": "Speaker_0",
+          "quality_score": 0.9,
+          "metadata": null,
+          "text_length": 410
+        },
+        {
+          "id": "perf_chunk_001",
+          "start_time": 5.0,
+          "end_time": 10.0,
+          "speaker": "Speaker_1",
+          "quality_score": 0.91,
+          "metadata": null,
+          "text_length": 410
+        },
+        {
+          "id": "perf_chunk_002",
+          "start_time": 10.0,
+          "end_time": 15.0,
+          "speaker": "Speaker_2",
+          "quality_score": 0.92,
+          "metadata": null,
+          "text_length": 410
+        },
+        {
+          "id": "perf_chunk_003",
+          "start_time": 15.0,
+          "end_time": 20.0,
+          "speaker": "Speaker_0",
+          "quality_score": 0.93,
+          "metadata": null,
+          "text_length": 410
+        },
+        {
+          "id": "perf_chunk_004",
+          "start_time": 20.0,
+          "end_time": 25.0,
+          "speaker": "Speaker_1",
+          "quality_score": 0.9400000000000001,
+          "metadata": null,
+          "text_length": 410
+        },
+        {
+          "id": "perf_chunk_005",
+          "start_time": 25.0,
+          "end_time": 30.0,
+          "speaker": "Speaker_2",
+          "quality_score": 0.9500000000000001,
+          "metadata": null,
+          "text_length": 410
+        },
+        {
+          "id": "perf_chunk_006",
+          "start_time": 30.0,
+          "end_time": 35.0,
+          "speaker": "Speaker_0",
+          "quality_score": 0.96,
+          "metadata": null,
+          "text_length": 410
+        },
+        {
+          "id": "perf_chunk_007",
+          "start_time": 35.0,
+          "end_time": 40.0,
+          "speaker": "Speaker_1",
+          "quality_score": 0.97,
+          "metadata": null,
+          "text_length": 410
+        },
+        {
+          "id": "perf_chunk_008",
+          "start_time": 40.0,
+          "end_time": 45.0,
+          "speaker": "Speaker_2",
+          "quality_score": 0.98,
+          "metadata": null,
+          "text_length": 410
+        },
+        {
+          "id": "perf_chunk_009",
+          "start_time": 45.0,
+          "end_time": 50.0,
+          "speaker": "Speaker_0",
+          "quality_score": 0.99,
+          "metadata": null,
+          "text_length": 410
+        },
+        {
+          "id": "perf_chunk_010",
+          "start_time": 50.0,
+          "end_time": 55.0,
+          "speaker": "Speaker_1",
+          "quality_score": 0.9,
+          "metadata": null,
+          "text_length": 420
+        },
+        {
+          "id": "perf_chunk_011",
+          "start_time": 55.0,
+          "end_time": 60.0,
+          "speaker": "Speaker_2",
+          "quality_score": 0.91,
+          "metadata": null,
+          "text_length": 420
+        },
+        {
+          "id": "perf_chunk_012",
+          "start_time": 60.0,
+          "end_time": 65.0,
+          "speaker": "Speaker_0",
+          "quality_score": 0.92,
+          "metadata": null,
+          "text_length": 420
+        },
+        {
+          "id": "perf_chunk_013",
+          "start_time": 65.0,
+          "end_time": 70.0,
+          "speaker": "Speaker_1",
+          "quality_score": 0.93,
+          "metadata": null,
+          "text_length": 420
+        },
+        {
+          "id": "perf_chunk_014",
+          "start_time": 70.0,
+          "end_time": 75.0,
+          "speaker": "Speaker_2",
+          "quality_score": 0.9400000000000001,
+          "metadata": null,
+          "text_length": 420
+        },
+        {
+          "id": "perf_chunk_015",
+          "start_time": 75.0,
+          "end_time": 80.0,
+          "speaker": "Speaker_0",
+          "quality_score": 0.9500000000000001,
+          "metadata": null,
+          "text_length": 420
+        },
+        {
+          "id": "perf_chunk_016",
+          "start_time": 80.0,
+          "end_time": 85.0,
+          "speaker": "Speaker_1",
+          "quality_score": 0.96,
+          "metadata": null,
+          "text_length": 420
+        },
+        {
+          "id": "perf_chunk_017",
+          "start_time": 85.0,
+          "end_time": 90.0,
+          "speaker": "Speaker_2",
+          "quality_score": 0.97,
+          "metadata": null,
+          "text_length": 420
+        },
+        {
+          "id": "perf_chunk_018",
+          "start_time": 90.0,
+          "end_time": 95.0,
+          "speaker": "Speaker_0",
+          "quality_score": 0.98,
+          "metadata": null,
+          "text_length": 420
+        },
+        {
+          "id": "perf_chunk_019",
+          "start_time": 95.0,
+          "end_time": 100.0,
+          "speaker": "Speaker_1",
+          "quality_score": 0.99,
+          "metadata": null,
+          "text_length": 420
+        }
+      ],
+      "created": "2025-06-15T19:42:21.289142",
+      "video_size_bytes": 264160
+    }
+  },
+  "statistics": {
+    "total_episodes": 1,
+    "total_chunks": 20,
+    "total_storage_bytes": 264160
+  },
+  "last_updated": "2025-06-15T19:42:21.289204"
+}

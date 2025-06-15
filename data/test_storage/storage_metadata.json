@@ -1,0 +1,70 @@
+{
+  "created": "2025-06-15T19:37:15.586126",
+  "episodes": {
+    "episode_001": {
+      "episode_id": "episode_001",
+      "video_path": "data/test_storage/episode_001.mp4",
+      "index_path": "data/test_storage/episode_001_index.json",
+      "chunk_count": 4,
+      "checksum": "850c46ec58bdd2c5e40c072443a4138810d6323e3bc39c8e361fc9d00f25619c",
+      "chunks": [
+        {
+          "id": "ep001_chunk_001",
+          "start_time": 0.0,
+          "end_time": 5.2,
+          "speaker": "Host",
+          "quality_score": 0.95,
+          "metadata": {
+            "topic": "introduction",
+            "confidence": 0.98
+          },
+          "text_length": 74
+        },
+        {
+          "id": "ep001_chunk_002",
+          "start_time": 5.2,
+          "end_time": 12.8,
+          "speaker": "Host",
+          "quality_score": 0.92,
+          "metadata": {
+            "topic": "guest_introduction",
+            "confidence": 0.95
+          },
+          "text_length": 147
+        },
+        {
+          "id": "ep001_chunk_003",
+          "start_time": 12.8,
+          "end_time": 19.5,
+          "speaker": "Dr. Sarah Chen",
+          "quality_score": 0.88,
+          "metadata": {
+            "topic": "guest_response",
+            "confidence": 0.91
+          },
+          "text_length": 117
+        },
+        {
+          "id": "ep001_chunk_004",
+          "start_time": 19.5,
+          "end_time": 26.1,
+          "speaker": "Host",
+          "quality_score": 0.94,
+          "metadata": {
+            "topic": "technical_question",
+            "confidence": 0.97
+          },
+          "text_length": 110
+        }
+      ],
+      "created": "2025-06-15T19:42:11.748849",
+      "video_size_bytes": 125394
+    }
+  },
+  "statistics": {
+    "total_episodes": 1,
+    "total_chunks": 4,
+    "total_storage_bytes": 125394
+  },
+  "last_updated": "2025-06-15T19:42:11.748885"
+}

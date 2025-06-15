@@ -1,7 +1,14 @@
 {
   "permissions": {
     "allow": [
-      "Bash(touch:*)"
+      "Bash(touch:*)",
+      "Bash(mkdir:*)",
+      "Bash(find:*)",
+      "Bash(ls:*)",
+      "Bash(source:*)",
+      "Bash(python test:*)",
+      "Bash(pip freeze)",
+      "WebFetch(domain:github.com)"
     ],
     "deny": []
   }
