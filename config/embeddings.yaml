@@ -1,5 +1,20 @@
 # Embedding Configuration for Podcast Search Repository
 
+# Video Storage Configuration (Memvid)
+video_storage:
+  # Video encoding settings
+  codec: "mp4v"  # Video codec (mp4v, h264, h265)
+  fps: 1  # Frames per second (higher = more storage capacity)
+  frame_size: [640, 480]  # Video frame dimensions [width, height]
+  
+  # QR code settings  
+  qr_error_correction: "L"  # Error correction level (L, M, Q, H)
+  qr_border: 4  # QR code border size
+  
+  # Storage optimization
+  chunk_size: 500  # Maximum characters per chunk
+  compression_level: 6  # FFmpeg compression level (0-9)
+
 # Model Selection
 model:
   # Primary model for semantic embeddings
