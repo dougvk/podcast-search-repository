@@ -13,6 +13,11 @@ from .video_encoder import VideoEncoder
 # Memvid integration for efficient storage and retrieval
 try:
     from memvid import MemvidEncoder, MemvidRetriever
+    import qrcode
+    from qrcode.image.styledpil import StyledPilImage
+    import cv2
+    import numpy as np
+    from pyzbar import pyzbar
     MEMVID_AVAILABLE = True
 except ImportError:
     MEMVID_AVAILABLE = False
@@ -55,6 +60,39 @@ class StorageResult:
     checksum: str
     error_message: Optional[str] = None
     
+class QRCodeManager:
+    """Minimal QR code utilities for data integrity and metadata embedding."""
+    
+    @staticmethod
+    def generate_qr(data: str, error_correction=qrcode.ERROR_CORRECT_M) -> qrcode.QRCode:
+        """Generate QR code with optimal settings for video embedding."""
+        qr = qrcode.QRCode(version=1, error_correction=error_correction, box_size=10, border=4)
+        qr.add_data(data)
+        qr.make(fit=True)
+        return qr
+    
+    @staticmethod 
+    def extract_qr_from_frame(frame: np.ndarray) -> List[str]:
+        """Extract QR codes from video frame."""
+        decoded_objects = pyzbar.decode(frame)
+        return [obj.data.decode('utf-8') for obj in decoded_objects]
+    
+    @staticmethod
+    def verify_qr_integrity(video_path: str, expected_data: List[str]) -> bool:
+        """Verify QR codes in video match expected data."""
+        cap = cv2.VideoCapture(video_path)
+        found_data = set()
+        
+        while cap.read()[0]:
+            ret, frame = cap.read()
+            if ret:
+                qr_data = QRCodeManager.extract_qr_from_frame(frame)
+                found_data.update(qr_data)
+                if len(found_data) >= len(expected_data):
+                    break
+        cap.release()
+        return set(expected_data).issubset(found_data)
+
 class MetadataIndexer:
     """Efficient metadata indexing with search capabilities."""
     
@@ -142,6 +180,7 @@ class StorageManager:
             # Initialize metadata tracking and indexing
             self.metadata_file = self.storage_dir / "storage_metadata.json"
             self.indexer = MetadataIndexer(self.storage_dir)
+            self.qr_manager = QRCodeManager()
             self._load_metadata()
             
             logger.info(f"StorageManager initialized with directory: {self.storage_dir}")
@@ -332,12 +371,20 @@ class StorageManager:
                     checksum=checksum, error_message=error_msg
                 )
             
-            # Update metadata and index
+            # QR integrity check (if using memvid)
+            qr_valid = True
+            if self.use_memvid:
+                chunk_ids = [chunk.id for chunk in chunks]
+                qr_valid = self.qr_manager.verify_qr_integrity(video_path, chunk_ids[:5])  # Sample check
+                logger.info(f"QR integrity check: {'✓' if qr_valid else '✗'}")
+            
+            # Update metadata and index  
             video_size = Path(video_path).stat().st_size
             metadata = {
                 'episode_id': episode_id, 'video_path': video_path, 'index_path': index_path,
                 'chunk_count': len(chunks), 'checksum': checksum, 'chunks': chunks,
-                'created': datetime.now().isoformat(), 'video_size_bytes': video_size
+                'created': datetime.now().isoformat(), 'video_size_bytes': video_size,
+                'qr_verified': qr_valid
             }
             self._update_episode_metadata(episode_id, chunks, video_path, index_path, checksum)
             self.indexer.index_episode(episode_id, metadata)
@@ -628,6 +675,31 @@ class StorageManager:
         except Exception as e:
             logger.error(f"Failed to archive episode {episode_id}: {e}")
             return False
+    
+    def generate_episode_qr(self, episode_id: str, data: str) -> bytes:
+        """Generate QR code for episode metadata embedding."""
+        qr = self.qr_manager.generate_qr(f"{episode_id}:{data}")
+        img = qr.make_image(fill_color="black", back_color="white")
+        from io import BytesIO
+        buffer = BytesIO()
+        img.save(buffer, format='PNG')
+        return buffer.getvalue()
+    
+    def validate_episode_qr(self, episode_id: str) -> Dict[str, bool]:
+        """Validate QR codes in episode video for data integrity."""
+        episode_data = self.metadata.get("episodes", {}).get(episode_id)
+        if not episode_data:
+            return {"exists": False, "valid": False}
+        
+        video_path = episode_data.get("video_path")
+        if not video_path or not Path(video_path).exists():
+            return {"exists": True, "valid": False}
+        
+        # Quick validation using stored chunk IDs
+        chunk_ids = [chunk.get('id', '') for chunk in episode_data.get('chunks', [])]
+        is_valid = self.qr_manager.verify_qr_integrity(video_path, chunk_ids[:3])
+        
+        return {"exists": True, "valid": is_valid}
 
 class VideoStorage(StorageManager):
     """Legacy compatibility class - redirects to StorageManager."""
