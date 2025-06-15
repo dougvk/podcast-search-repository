@@ -7,6 +7,9 @@ import time
 import hashlib
 import logging
 from datetime import datetime
+import threading
+from functools import wraps
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .video_encoder import VideoEncoder
 
@@ -61,6 +64,14 @@ class StorageResult:
     checksum: str
     error_message: Optional[str] = None
     
+def thread_safe(method):
+    """Decorator for thread-safe method execution."""
+    @wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with getattr(self, '_lock', threading.RLock()):
+            return method(self, *args, **kwargs)
+    return wrapper
+
 class MemvidConfig:
     """Memvid best practices configuration following README guidelines."""
     
@@ -208,6 +219,12 @@ class StorageManager:
             self.metadata_file = self.storage_dir / "storage_metadata.json"
             self.indexer = MetadataIndexer(self.storage_dir)
             self.qr_manager = QRCodeManager()
+            
+            # Thread safety
+            self._lock = threading.RLock()
+            self._operation_locks = {}  # Per-episode locks
+            self._executor = ThreadPoolExecutor(max_workers=n_workers)
+            
             self._load_metadata()
             
             logger.info(f"StorageManager initialized with directory: {self.storage_dir}")
@@ -252,6 +269,14 @@ class StorageManager:
                 }
             }
     
+    def _get_episode_lock(self, episode_id: str) -> threading.RLock:
+        """Get or create per-episode lock for fine-grained concurrency."""
+        with self._lock:
+            if episode_id not in self._operation_locks:
+                self._operation_locks[episode_id] = threading.RLock()
+            return self._operation_locks[episode_id]
+
+    @thread_safe
     def _save_metadata(self):
         """Save metadata to storage."""
         try:
@@ -320,117 +345,119 @@ class StorageManager:
         return errors
     
     def encode_chunks_to_video(self, chunks: List[Chunk]) -> StorageResult:
-        """Encode chunks to video with memvid integration and validation."""
+        """Thread-safe encode chunks to video with memvid integration."""
         start_time = time.time()
         
         try:
             logger.info(f"Starting encode operation for {len(chunks)} chunks")
             
-            # Input validation
-            validation_errors = self._validate_chunks(chunks)
-            if validation_errors:
-                error_msg = f"Validation failed: {'; '.join(validation_errors)}"
-                logger.error(error_msg)
-                return StorageResult(
-                    success=False,
-                    video_path="",
-                    index_path="",
-                    chunk_count=0,
-                    processing_time=time.time() - start_time,
-                    video_size_bytes=0,
-                    text_size_bytes=0,
-                    checksum="",
-                    error_message=error_msg
-                )
-            
-            # Extract episode ID
+            # Get episode ID for per-episode locking
             episode_id = chunks[0].episode_id
+            episode_lock = self._get_episode_lock(episode_id)
             
-            # Verify all chunks belong to same episode
-            if not all(chunk.episode_id == episode_id for chunk in chunks):
-                error_msg = "All chunks must belong to the same episode"
-                logger.error(error_msg)
-                return StorageResult(
-                    success=False,
-                    video_path="",
-                    index_path="",
-                    chunk_count=0,
-                    processing_time=time.time() - start_time,
-                    video_size_bytes=0,
-                    text_size_bytes=0,
-                    checksum="",
-                    error_message=error_msg
-                )
-            
-            # Use hierarchical path organization  
-            video_path = str(self._get_episode_path(episode_id))
-            index_path = str(Path(video_path).with_suffix('_index.json'))
-            
-            # Calculate metrics
-            text_chunks = [chunk.text for chunk in chunks]
-            text_size = sum(len(text.encode('utf-8')) for text in text_chunks)
-            checksum = self._calculate_checksum(chunks)
-            
-            # Use memvid with best practices or fallback
-            try:
-                if self.use_memvid:
-                    # Memvid encoding with optimized parameters
-                    self.memvid_encoder.add_chunks(text_chunks)
-                    self.memvid_encoder.build_video(video_path, index_path, **self.video_params)
-                    success = Path(video_path).exists() and Path(index_path).exists()
-                else:
-                    # Fallback encoding
-                    encode_result = self.video_encoder.encode(text_chunks, episode_id)
-                    video_path = encode_result['video_path']
-                    index_path = encode_result['index_path']
-                    success = Path(video_path).exists()
+            with episode_lock:
+                # Input validation
+                validation_errors = self._validate_chunks(chunks)
+                if validation_errors:
+                    error_msg = f"Validation failed: {'; '.join(validation_errors)}"
+                    logger.error(error_msg)
+                    return StorageResult(
+                        success=False,
+                        video_path="",
+                        index_path="",
+                        chunk_count=0,
+                        processing_time=time.time() - start_time,
+                        video_size_bytes=0,
+                        text_size_bytes=0,
+                        checksum="",
+                        error_message=error_msg
+                    )
                 
-                if not success:
-                    raise Exception("Output files not created")
+                # Verify all chunks belong to same episode
+                if not all(chunk.episode_id == episode_id for chunk in chunks):
+                    error_msg = "All chunks must belong to the same episode"
+                    logger.error(error_msg)
+                    return StorageResult(
+                        success=False,
+                        video_path="",
+                        index_path="",
+                        chunk_count=0,
+                        processing_time=time.time() - start_time,
+                        video_size_bytes=0,
+                        text_size_bytes=0,
+                        checksum="",
+                        error_message=error_msg
+                    )
+                
+                # Use hierarchical path organization  
+                video_path = str(self._get_episode_path(episode_id))
+                index_path = str(Path(video_path).with_suffix('.json').with_name(Path(video_path).stem + '_index.json'))
+                
+                # Calculate metrics
+                text_chunks = [chunk.text for chunk in chunks]
+                text_size = sum(len(text.encode('utf-8')) for text in text_chunks)
+                checksum = self._calculate_checksum(chunks)
+                
+                # Use memvid with best practices or fallback
+                try:
+                    if self.use_memvid:
+                        # Memvid encoding with optimized parameters
+                        self.memvid_encoder.add_chunks(text_chunks)
+                        self.memvid_encoder.build_video(video_path, index_path, **self.video_params)
+                        success = Path(video_path).exists() and Path(index_path).exists()
+                    else:
+                        # Fallback encoding
+                        encode_result = self.video_encoder.encode(text_chunks, episode_id)
+                        video_path = encode_result['video_path']
+                        index_path = encode_result['index_path']
+                        success = Path(video_path).exists()
                     
-            except Exception as e:
-                error_msg = f"Encoding failed: {str(e)}"
-                logger.error(error_msg)
-                return StorageResult(
-                    success=False, video_path=video_path, index_path=index_path,
-                    chunk_count=len(chunks), processing_time=time.time() - start_time,
-                    video_size_bytes=0, text_size_bytes=text_size,
-                    checksum=checksum, error_message=error_msg
+                    if not success:
+                        raise Exception("Output files not created")
+                        
+                except Exception as e:
+                    error_msg = f"Encoding failed: {str(e)}"
+                    logger.error(error_msg)
+                    return StorageResult(
+                        success=False, video_path=video_path, index_path=index_path,
+                        chunk_count=len(chunks), processing_time=time.time() - start_time,
+                        video_size_bytes=0, text_size_bytes=text_size,
+                        checksum=checksum, error_message=error_msg
+                    )
+                
+                # QR integrity check (if using memvid)
+                qr_valid = True
+                if self.use_memvid:
+                    chunk_ids = [chunk.id for chunk in chunks]
+                    qr_valid = self.qr_manager.verify_qr_integrity(video_path, chunk_ids[:5])  # Sample check
+                    logger.info(f"QR integrity check: {'✓' if qr_valid else '✗'}")
+                
+                # Update metadata and index  
+                video_size = Path(video_path).stat().st_size
+                metadata = {
+                    'episode_id': episode_id, 'video_path': video_path, 'index_path': index_path,
+                    'chunk_count': len(chunks), 'checksum': checksum, 'chunks': chunks,
+                    'created': datetime.now().isoformat(), 'video_size_bytes': video_size,
+                    'qr_verified': qr_valid
+                }
+                self._update_episode_metadata(episode_id, chunks, video_path, index_path, checksum)
+                self.indexer.index_episode(episode_id, metadata)
+                
+                processing_time = time.time() - start_time
+                
+                result = StorageResult(
+                    success=True,
+                    video_path=video_path,
+                    index_path=index_path,
+                    chunk_count=len(chunks),
+                    processing_time=processing_time,
+                    video_size_bytes=video_size,
+                    text_size_bytes=text_size,
+                    checksum=checksum
                 )
-            
-            # QR integrity check (if using memvid)
-            qr_valid = True
-            if self.use_memvid:
-                chunk_ids = [chunk.id for chunk in chunks]
-                qr_valid = self.qr_manager.verify_qr_integrity(video_path, chunk_ids[:5])  # Sample check
-                logger.info(f"QR integrity check: {'✓' if qr_valid else '✗'}")
-            
-            # Update metadata and index  
-            video_size = Path(video_path).stat().st_size
-            metadata = {
-                'episode_id': episode_id, 'video_path': video_path, 'index_path': index_path,
-                'chunk_count': len(chunks), 'checksum': checksum, 'chunks': chunks,
-                'created': datetime.now().isoformat(), 'video_size_bytes': video_size,
-                'qr_verified': qr_valid
-            }
-            self._update_episode_metadata(episode_id, chunks, video_path, index_path, checksum)
-            self.indexer.index_episode(episode_id, metadata)
-            
-            processing_time = time.time() - start_time
-            
-            result = StorageResult(
-                success=True,
-                video_path=video_path,
-                index_path=index_path,
-                chunk_count=len(chunks),
-                processing_time=processing_time,
-                video_size_bytes=video_size,
-                text_size_bytes=text_size,
-                checksum=checksum
-            )
-            
-            logger.info(f"Successfully encoded {len(chunks)} chunks in {processing_time:.2f}s")
-            return result
+                
+                logger.info(f"Successfully encoded {len(chunks)} chunks in {processing_time:.2f}s")
+                return result
             
         except Exception as e:
             error_msg = f"Critical error during encoding: {str(e)}"
@@ -448,110 +475,109 @@ class StorageManager:
             )
     
     def decode_chunks_from_video(self, video_path: str) -> List[Chunk]:
-        """Decode chunks from video with memvid integration."""
+        """Thread-safe decode chunks from video with memvid integration."""
         try:
             logger.info(f"Decoding video: {video_path}")
             
             video_file = Path(video_path)
-            if not video_file.exists():
-                raise FileNotFoundError(f"Video file not found: {video_path}")
-            
-            index_path = str(video_file.with_suffix('_index.json'))
-            if not Path(index_path).exists():
-                raise FileNotFoundError(f"Index file not found: {index_path}")
-            
-            # Use memvid if available
-            if self.use_memvid:
-                retriever = MemvidRetriever(video_path, index_path)
-                # Get all chunks from the video - using a broad search to get everything
-                search_results = retriever.search("", top_k=10000)  # Large number to get all
-                text_chunks = [chunk for chunk, score in search_results]
-            else:
-                text_chunks = self.video_encoder.decode(video_path, index_path)
-            
-            # Reconstruct Chunk objects from metadata
             episode_id = video_file.stem.replace('_index', '')
-            episode_metadata = self.metadata.get("episodes", {}).get(episode_id, {})
-            chunk_metadata = episode_metadata.get("chunks", [])
+            episode_lock = self._get_episode_lock(episode_id)
             
-            # Reconstruct Chunk objects
-            chunks = []
-            for i, text in enumerate(text_chunks):
-                # Use stored metadata if available, otherwise create basic chunk
-                if i < len(chunk_metadata):
-                    metadata = chunk_metadata[i]
-                    chunk = Chunk(
-                        id=metadata.get("id", f"{episode_id}_chunk_{i}"),
-                        episode_id=episode_id,
-                        text=text,
-                        start_time=metadata.get("start_time"),
-                        end_time=metadata.get("end_time"),
-                        speaker=metadata.get("speaker"),
-                        quality_score=metadata.get("quality_score"),
-                        metadata=metadata.get("metadata")
-                    )
+            with episode_lock:
+                if not video_file.exists():
+                    raise FileNotFoundError(f"Video file not found: {video_path}")
+                
+                index_path = str(Path(video_path).with_suffix('.json').with_name(Path(video_path).stem + '_index.json'))
+                if not Path(index_path).exists():
+                    raise FileNotFoundError(f"Index file not found: {index_path}")
+                
+                # Use memvid if available
+                if self.use_memvid:
+                    retriever = MemvidRetriever(video_path, index_path)
+                    # Get all chunks from the video - using a broad search to get everything
+                    search_results = retriever.search("", top_k=10000)  # Large number to get all
+                    text_chunks = [chunk for chunk, score in search_results]
                 else:
-                    chunk = Chunk(
-                        id=f"{episode_id}_chunk_{i}",
-                        episode_id=episode_id,
-                        text=text
-                    )
-                chunks.append(chunk)
-            
-            # Verify integrity if checksum available
-            stored_checksum = episode_metadata.get("checksum")
-            if stored_checksum:
-                calculated_checksum = self._calculate_checksum(chunks)
-                if stored_checksum != calculated_checksum:
-                    logger.warning(f"Checksum mismatch for {episode_id}. Data may be corrupted.")
-            
-            logger.info(f"Successfully decoded {len(chunks)} chunks from {video_path}")
-            return chunks
+                    text_chunks = self.video_encoder.decode(video_path, index_path)
+                
+                # Reconstruct Chunk objects from metadata
+                episode_metadata = self.metadata.get("episodes", {}).get(episode_id, {})
+                chunk_metadata = episode_metadata.get("chunks", [])
+                
+                # Reconstruct Chunk objects
+                chunks = []
+                for i, text in enumerate(text_chunks):
+                    # Use stored metadata if available, otherwise create basic chunk
+                    if i < len(chunk_metadata):
+                        metadata = chunk_metadata[i]
+                        chunk = Chunk(
+                            id=metadata.get("id", f"{episode_id}_chunk_{i}"),
+                            episode_id=episode_id,
+                            text=text,
+                            start_time=metadata.get("start_time"),
+                            end_time=metadata.get("end_time"),
+                            speaker=metadata.get("speaker"),
+                            quality_score=metadata.get("quality_score"),
+                            metadata=metadata.get("metadata")
+                        )
+                    else:
+                        chunk = Chunk(
+                            id=f"{episode_id}_chunk_{i}",
+                            episode_id=episode_id,
+                            text=text
+                        )
+                    chunks.append(chunk)
+                
+                # Verify integrity if checksum available
+                stored_checksum = episode_metadata.get("checksum")
+                if stored_checksum:
+                    calculated_checksum = self._calculate_checksum(chunks)
+                    if stored_checksum != calculated_checksum:
+                        logger.warning(f"Checksum mismatch for {episode_id}. Data may be corrupted.")
+                
+                logger.info(f"Successfully decoded {len(chunks)} chunks from {video_path}")
+                return chunks
             
         except Exception as e:
             logger.error(f"Failed to decode video {video_path}: {str(e)}")
             raise
     
+    @thread_safe
     def _update_episode_metadata(self, episode_id: str, chunks: List[Chunk], 
                                 video_path: str, index_path: str, checksum: str):
         """Update metadata for an episode."""
         try:
-            chunk_metadata = []
-            for chunk in chunks:
-                chunk_meta = {
-                    "id": chunk.id,
-                    "start_time": chunk.start_time,
-                    "end_time": chunk.end_time,
-                    "speaker": chunk.speaker,
-                    "quality_score": chunk.quality_score,
-                    "metadata": chunk.metadata,
-                    "text_length": len(chunk.text)
-                }
-                chunk_metadata.append(chunk_meta)
-            
-            episode_metadata = {
+            episode_data = {
                 "episode_id": episode_id,
                 "video_path": video_path,
                 "index_path": index_path,
-                "chunk_count": len(chunks),
                 "checksum": checksum,
-                "chunks": chunk_metadata,
+                "chunk_count": len(chunks),
                 "created": datetime.now().isoformat(),
-                "video_size_bytes": Path(video_path).stat().st_size if Path(video_path).exists() else 0
+                "chunks": [
+                    {
+                        "id": chunk.id,
+                        "text_preview": chunk.text[:100] + "..." if len(chunk.text) > 100 else chunk.text,
+                        "start_time": chunk.start_time,
+                        "end_time": chunk.end_time,
+                        "speaker": chunk.speaker,
+                        "quality_score": chunk.quality_score,
+                        "metadata": chunk.metadata
+                    }
+                    for chunk in chunks
+                ]
             }
             
-            self.metadata["episodes"][episode_id] = episode_metadata
+            if "episodes" not in self.metadata:
+                self.metadata["episodes"] = {}
             
-            # Update statistics
-            stats = self.metadata["statistics"]
-            stats["total_episodes"] = len(self.metadata["episodes"])
-            stats["total_chunks"] = sum(ep.get("chunk_count", 0) for ep in self.metadata["episodes"].values())
-            stats["total_storage_bytes"] = sum(ep.get("video_size_bytes", 0) for ep in self.metadata["episodes"].values())
-            
+            self.metadata["episodes"][episode_id] = episode_data
             self._save_metadata()
             
+            logger.info(f"Updated metadata for episode {episode_id}")
+            
         except Exception as e:
-            logger.error(f"Failed to update episode metadata: {e}")
+            logger.error(f"Failed to update metadata for episode {episode_id}: {str(e)}")
     
     def get_chunk_by_id(self, chunk_id: str) -> Optional[Chunk]:
         """Retrieve a specific chunk by ID."""
@@ -759,6 +785,42 @@ class StorageManager:
             return None
         
         return MemvidChat(video_path, index_path, api_key=api_key)
+
+    def batch_encode(self, episode_chunks: Dict[str, List[Chunk]]) -> Dict[str, StorageResult]:
+        """Concurrent batch encoding of multiple episodes with thread pool."""
+        futures = {}
+        results = {}
+        
+        for episode_id, chunks in episode_chunks.items():
+            future = self._executor.submit(self.encode_chunks_to_video, chunks)
+            futures[episode_id] = future
+        
+        for episode_id, future in futures.items():
+            try:
+                results[episode_id] = future.result(timeout=300)  # 5min timeout
+            except Exception as e:
+                logger.error(f"Batch encode failed for {episode_id}: {e}")
+                results[episode_id] = StorageResult(
+                    success=False, video_path="", index_path="", chunk_count=0,
+                    processing_time=0.0, video_size_bytes=0, text_size_bytes=0,
+                    checksum="", error_message=str(e)
+                )
+        
+        return results
+
+    def cleanup(self):
+        """Cleanup resources including thread pool."""
+        try:
+            self._executor.shutdown(wait=True)  # Remove timeout for compatibility
+            logger.info("Thread pool cleanup completed")
+        except Exception as e:
+            logger.error(f"Cleanup error: {e}")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.cleanup()
 
 class VideoStorage(StorageManager):
     """Legacy compatibility class - redirects to StorageManager."""
