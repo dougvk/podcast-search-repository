@@ -134,4 +134,4 @@ node_modules/
 *.njsproj
 *.sln
 *.sw?
-# OS specific
+# OS specificdata/embeddings_cache/
