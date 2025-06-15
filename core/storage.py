@@ -12,7 +12,8 @@ from .video_encoder import VideoEncoder
 
 # Memvid integration for efficient storage and retrieval
 try:
-    from memvid import MemvidEncoder, MemvidRetriever
+    from memvid import MemvidEncoder, MemvidRetriever, MemvidChat
+    from sentence_transformers import SentenceTransformer
     import qrcode
     from qrcode.image.styledpil import StyledPilImage
     import cv2
@@ -60,6 +61,28 @@ class StorageResult:
     checksum: str
     error_message: Optional[str] = None
     
+class MemvidConfig:
+    """Memvid best practices configuration following README guidelines."""
+    
+    @staticmethod
+    def get_optimized_encoder(chunk_size: int = 512, overlap: int = 50, n_workers: int = 4) -> MemvidEncoder:
+        """Create optimized encoder with custom embedding model."""
+        if not MEMVID_AVAILABLE:
+            return None
+        # Use high-quality embedding model for better semantic search
+        custom_model = SentenceTransformer('sentence-transformers/all-mpnet-base-v2')
+        return MemvidEncoder(embedding_model=custom_model, n_workers=n_workers)
+    
+    @staticmethod
+    def get_video_params(quality: str = 'balanced') -> Dict[str, Any]:
+        """Get optimized video parameters based on quality level."""
+        configs = {
+            'high_quality': {'fps': 60, 'frame_size': 512, 'video_codec': 'h265', 'crf': 18},
+            'balanced': {'fps': 30, 'frame_size': 512, 'video_codec': 'h264', 'crf': 23},
+            'compressed': {'fps': 30, 'frame_size': 256, 'video_codec': 'h265', 'crf': 28}
+        }
+        return configs.get(quality, configs['balanced'])
+
 class QRCodeManager:
     """Minimal QR code utilities for data integrity and metadata embedding."""
     
@@ -152,8 +175,10 @@ class StorageManager:
     def __init__(self, 
                  storage_dir: str = "data/video_libraries",
                  video_encoder_config: Optional[Dict[str, Any]] = None,
-                 use_memvid: bool = True):
-        """Initialize StorageManager with error handling and validation."""
+                 use_memvid: bool = True,
+                 quality: str = 'balanced',
+                 n_workers: int = 4):
+        """Initialize StorageManager with memvid best practices."""
         try:
             self.storage_dir = Path(storage_dir)
             self.storage_dir.mkdir(parents=True, exist_ok=True)
@@ -171,11 +196,13 @@ class StorageManager:
             encoder_config['output_dir'] = str(self.episodes_dir)
             self.video_encoder = VideoEncoder(**encoder_config)
             
-            # Initialize memvid if available
+            # Initialize memvid with best practices
             self.use_memvid = use_memvid and MEMVID_AVAILABLE
+            self.quality = quality
+            self.video_params = MemvidConfig.get_video_params(quality)
             if self.use_memvid:
-                self.memvid_encoder = MemvidEncoder()
-                logger.info("Memvid integration enabled")
+                self.memvid_encoder = MemvidConfig.get_optimized_encoder(n_workers=n_workers)
+                logger.info(f"Memvid enabled: {quality} quality, {n_workers} workers")
             
             # Initialize metadata tracking and indexing
             self.metadata_file = self.storage_dir / "storage_metadata.json"
@@ -344,12 +371,12 @@ class StorageManager:
             text_size = sum(len(text.encode('utf-8')) for text in text_chunks)
             checksum = self._calculate_checksum(chunks)
             
-            # Use memvid if available, fallback to video encoder
+            # Use memvid with best practices or fallback
             try:
                 if self.use_memvid:
-                    # Memvid encoding - optimized for compression
+                    # Memvid encoding with optimized parameters
                     self.memvid_encoder.add_chunks(text_chunks)
-                    self.memvid_encoder.build_video(video_path, index_path, fps=30, frame_size=512)
+                    self.memvid_encoder.build_video(video_path, index_path, **self.video_params)
                     success = Path(video_path).exists() and Path(index_path).exists()
                 else:
                     # Fallback encoding
@@ -700,6 +727,38 @@ class StorageManager:
         is_valid = self.qr_manager.verify_qr_integrity(video_path, chunk_ids[:3])
         
         return {"exists": True, "valid": is_valid}
+    
+    def get_retriever(self, video_path: str, index_path: str) -> Optional[MemvidRetriever]:
+        """Get optimized retriever for semantic search following best practices."""
+        if not self.use_memvid or not Path(video_path).exists():
+            return None
+        return MemvidRetriever(video_path, index_path)
+    
+    def semantic_search(self, query: str, episode_id: str, top_k: int = 5) -> List[tuple]:
+        """Perform semantic search using memvid retriever."""
+        episode_data = self.metadata.get("episodes", {}).get(episode_id)
+        if not episode_data:
+            return []
+        
+        retriever = self.get_retriever(episode_data['video_path'], episode_data['index_path'])
+        if not retriever:
+            return []
+        
+        return retriever.search(query, top_k=top_k)
+    
+    def start_chat_session(self, episode_id: str, api_key: Optional[str] = None) -> Optional[MemvidChat]:
+        """Start interactive chat session following memvid best practices."""
+        episode_data = self.metadata.get("episodes", {}).get(episode_id)
+        if not episode_data or not self.use_memvid:
+            return None
+        
+        video_path = episode_data['video_path']
+        index_path = episode_data['index_path']
+        
+        if not (Path(video_path).exists() and Path(index_path).exists()):
+            return None
+        
+        return MemvidChat(video_path, index_path, api_key=api_key)
 
 class VideoStorage(StorageManager):
     """Legacy compatibility class - redirects to StorageManager."""
