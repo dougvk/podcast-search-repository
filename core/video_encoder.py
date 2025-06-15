@@ -2,9 +2,13 @@
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 from memvid import MemvidEncoder, MemvidRetriever
+from memvid.config import get_default_config
 from sentence_transformers import SentenceTransformer
 import os
 import logging
+
+# Set tokenizers parallelism to false (memvid best practice)
+os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -32,15 +36,8 @@ class VideoEncoder:
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         
-        # Initialize custom embedding model if specified
-        self.embedding_model = None
-        if embedding_model:
-            try:
-                self.embedding_model = SentenceTransformer(embedding_model)
-                logger.info(f"Loaded custom embedding model: {embedding_model}")
-            except Exception as e:
-                logger.warning(f"Failed to load custom embedding model {embedding_model}: {e}")
-                logger.info("Using default memvid embedding model")
+        # Store embedding model preference
+        self.embedding_model_name = embedding_model or 'sentence-transformers/all-MiniLM-L6-v2'
         
         # Store encoding parameters
         self.encoding_params = {
@@ -52,18 +49,31 @@ class VideoEncoder:
         }
         
         logger.info(f"VideoEncoder initialized with params: {self.encoding_params}")
+        logger.info(f"Using embedding model: {self.embedding_model_name}")
+        
+    def _create_memvid_encoder(self) -> MemvidEncoder:
+        """Create memvid encoder following proven best practices."""
+        # Use memvid's proven configuration approach
+        config = get_default_config()
+        
+        # Customize config for our use case
+        if 'embedding' not in config:
+            config['embedding'] = {}
+        
+        # Set custom embedding model
+        config['embedding']['model'] = self.embedding_model_name
+        
+        # Set worker count
+        config['n_workers'] = self.encoding_params['n_workers']
+        
+        # Create encoder with memvid's proven initialization
+        return MemvidEncoder(config)
         
     def encode(self, chunks: List[str], episode_id: str) -> Dict[str, Any]:
         """Encode text chunks to video following memvid best practices."""
         try:
-            # Initialize encoder with config if custom embedding model specified
-            config = None
-            if self.embedding_model:
-                config = {
-                    'embedding_model': self.embedding_model
-                }
-            
-            encoder = MemvidEncoder(config=config)
+            # Initialize encoder with memvid's proven pattern
+            encoder = self._create_memvid_encoder()
             
             # Add chunks
             encoder.add_chunks(chunks)

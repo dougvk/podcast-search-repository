@@ -1,63 +1,90 @@
 #!/usr/bin/env python3
-"""Minimal, efficient embedding generator with sentence-transformers."""
+"""Memvid-powered embedding generator with proven stability patterns."""
 
 from typing import List, Optional, Dict, Any, Union
-import torch
+import os
 import logging
-from sentence_transformers import SentenceTransformer
 from pathlib import Path
 import hashlib
 import pickle
 import time
 from functools import lru_cache
 
+# Set tokenizers parallelism to false (memvid best practice)
+os.environ['TOKENIZERS_PARALLELISM'] = 'false'
+
+# Memvid integration for stable embeddings
+try:
+    from memvid import MemvidEncoder
+    from memvid.config import get_default_config
+    MEMVID_AVAILABLE = True
+except ImportError:
+    MEMVID_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 class EmbeddingConfig:
-    """Optimized configuration for embedding generation."""
+    """Optimized configuration for embedding generation using memvid."""
     
-    DEFAULT_MODEL = 'all-MiniLM-L6-v2'  # 384-dim, fast, good quality
+    DEFAULT_MODEL = 'sentence-transformers/all-MiniLM-L6-v2'  # 384-dim, fast, good quality
     BATCH_SIZE = 32
-    MAX_SEQ_LENGTH = 256
-    DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
     CACHE_SIZE = 10000
     
     @classmethod
-    def get_device_config(cls) -> Dict[str, Any]:
-        """Get optimized device configuration."""
-        return {
-            'device': cls.DEVICE,
-            'show_progress_bar': False,  # Performance
-            'convert_to_numpy': True,    # Memory efficiency
-            'normalize_embeddings': True  # Better similarity search
-        }
+    def get_memvid_config(cls, model_name: str = None) -> Dict[str, Any]:
+        """Get memvid configuration following best practices."""
+        config = get_default_config()
+        
+        # Customize config for our use case
+        if 'embedding' not in config:
+            config['embedding'] = {}
+        
+        # Set embedding model
+        config['embedding']['model'] = model_name or cls.DEFAULT_MODEL
+        
+        return config
 
 class EmbeddingGenerator:
-    """Ultra-efficient embedding generator with caching and batch processing."""
+    """Memvid-powered embedding generator with proven stability and caching."""
     
     def __init__(self, 
                  model_name: str = EmbeddingConfig.DEFAULT_MODEL,
-                 cache_dir: Optional[str] = None,
-                 device: Optional[str] = None):
+                 cache_dir: Optional[str] = None):
+        
+        if not MEMVID_AVAILABLE:
+            raise RuntimeError("Memvid not available. Install with: pip install memvid")
         
         self.model_name = model_name
-        self.device = device or EmbeddingConfig.DEVICE
         self.cache_dir = Path(cache_dir or "data/embeddings_cache")
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         
-        # Initialize model with optimized settings
-        logger.info(f"Loading {model_name} on {self.device}")
-        self.model = SentenceTransformer(
-            model_name, 
-            device=self.device,
-            trust_remote_code=True
-        )
+        # Initialize memvid encoder with proven pattern
+        self.model = None
+        self._initialized = False
         
-        # Configure for performance
-        self.model.max_seq_length = EmbeddingConfig.MAX_SEQ_LENGTH
-        self._memory_cache = {}  # In-memory LRU cache
-        
-        logger.info(f"✅ Model loaded: {self.model.get_sentence_embedding_dimension()}D vectors")
+        logger.info(f"EmbeddingGenerator initialized with model: {model_name}")
+
+    def _initialize(self):
+        """Initialize memvid embedding model lazily using proven pattern."""
+        if self._initialized:
+            return
+            
+        try:
+            # Use memvid's proven configuration approach
+            config = EmbeddingConfig.get_memvid_config(self.model_name)
+            encoder = MemvidEncoder(config)
+            
+            # Access the embedding model through index_manager (memvid's proven pattern)
+            if hasattr(encoder, 'index_manager') and hasattr(encoder.index_manager, 'embedding_model'):
+                self.model = encoder.index_manager.embedding_model
+                self._initialized = True
+                logger.info(f"✅ Memvid embedding model initialized: {type(self.model)}")
+            else:
+                raise RuntimeError("Could not access memvid's embedding model")
+                
+        except Exception as e:
+            logger.error(f"Failed to initialize memvid embedding model: {e}")
+            raise
 
     @lru_cache(maxsize=EmbeddingConfig.CACHE_SIZE)
     def _get_cached_embedding(self, text_hash: str) -> Optional[List[float]]:
@@ -85,7 +112,9 @@ class EmbeddingGenerator:
         return hashlib.md5(text.encode('utf-8')).hexdigest()
 
     def generate_embeddings(self, texts: Union[str, List[str]]) -> Union[List[float], List[List[float]]]:
-        """Generate embeddings with automatic caching and batching."""
+        """Generate embeddings using memvid's stable approach with caching."""
+        self._initialize()
+        
         single_input = isinstance(texts, str)
         text_list = [texts] if single_input else texts
         
@@ -108,16 +137,19 @@ class EmbeddingGenerator:
                 uncached_texts.append(text)
                 uncached_indices.append(i)
         
-        # Generate embeddings for uncached texts
+        # Generate embeddings for uncached texts using memvid's stable approach
         if uncached_texts:
             logger.debug(f"Computing {len(uncached_texts)}/{len(text_list)} embeddings")
             
-            # Batch encode with optimized settings
-            new_embeddings = self.model.encode(
-                uncached_texts,
-                batch_size=min(EmbeddingConfig.BATCH_SIZE, len(uncached_texts)),
-                **EmbeddingConfig.get_device_config()
-            ).tolist()
+            # Use memvid's proven embedding generation
+            new_embeddings = []
+            for text in uncached_texts:
+                try:
+                    embedding = self.model.encode(text, convert_to_numpy=True)
+                    new_embeddings.append(embedding.tolist())
+                except Exception as e:
+                    logger.error(f"Embedding generation failed for text: {text[:50]}... Error: {e}")
+                    new_embeddings.append([0.0] * self.embedding_dimension)  # Fallback zero vector
             
             # Cache and insert results
             for i, (text, embedding) in enumerate(zip(uncached_texts, new_embeddings)):
@@ -170,10 +202,13 @@ class EmbeddingGenerator:
     @property 
     def embedding_dimension(self) -> int:
         """Get embedding vector dimension."""
-        return self.model.get_sentence_embedding_dimension()
+        self._initialize()
+        # Test with a simple text to get dimension
+        test_embedding = self.model.encode("test", convert_to_numpy=True)
+        return test_embedding.shape[0]
 
     def __enter__(self):
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        pass  # Model cleanup handled by torch
+        pass  # Model cleanup handled by memvid

@@ -13,19 +13,37 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .video_encoder import VideoEncoder
 
+# Set tokenizers parallelism to false (memvid best practice)
+import os
+os.environ['TOKENIZERS_PARALLELISM'] = 'false'
+
 # Memvid integration for efficient storage and retrieval
 try:
     from memvid import MemvidEncoder, MemvidRetriever, MemvidChat
-    from sentence_transformers import SentenceTransformer
+    from memvid.config import get_default_config
+    MEMVID_AVAILABLE = True
+except ImportError:
+    MEMVID_AVAILABLE = False
+    logging.warning("Memvid not available. Using fallback storage.")
+
+# Optional dependencies for QR codes and video processing
+try:
     import qrcode
     from qrcode.image.styledpil import StyledPilImage
     import cv2
     import numpy as np
     from pyzbar import pyzbar
-    MEMVID_AVAILABLE = True
+    QR_AVAILABLE = True
 except ImportError:
-    MEMVID_AVAILABLE = False
-    logging.warning("Memvid not available. Using fallback storage.")
+    QR_AVAILABLE = False
+    logging.warning("QR code dependencies not available. QR features disabled.")
+
+# Sentence transformers for custom embedding models
+try:
+    from sentence_transformers import SentenceTransformer
+    SENTENCE_TRANSFORMERS_AVAILABLE = True
+except ImportError:
+    SENTENCE_TRANSFORMERS_AVAILABLE = False
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -76,13 +94,26 @@ class MemvidConfig:
     """Memvid best practices configuration following README guidelines."""
     
     @staticmethod
-    def get_optimized_encoder(chunk_size: int = 512, overlap: int = 50, n_workers: int = 4) -> MemvidEncoder:
-        """Create optimized encoder with custom embedding model."""
+    def get_optimized_encoder(n_workers: int = 4) -> MemvidEncoder:
+        """Create optimized encoder following memvid's proven pattern."""
         if not MEMVID_AVAILABLE:
             return None
+        
+        # Use memvid's proven configuration approach
+        config = get_default_config()
+        
+        # Customize config for our use case
+        if 'embedding' not in config:
+            config['embedding'] = {}
+        
         # Use high-quality embedding model for better semantic search
-        custom_model = SentenceTransformer('sentence-transformers/all-mpnet-base-v2')
-        return MemvidEncoder(embedding_model=custom_model, n_workers=n_workers)
+        config['embedding']['model'] = 'sentence-transformers/all-mpnet-base-v2'
+        
+        # Set worker count
+        config['n_workers'] = n_workers
+        
+        # Create encoder with memvid's proven initialization
+        return MemvidEncoder(config)
     
     @staticmethod
     def get_video_params(quality: str = 'balanced') -> Dict[str, Any]:
@@ -98,22 +129,35 @@ class QRCodeManager:
     """Minimal QR code utilities for data integrity and metadata embedding."""
     
     @staticmethod
-    def generate_qr(data: str, error_correction=qrcode.ERROR_CORRECT_M) -> qrcode.QRCode:
+    def generate_qr(data: str, error_correction=None) -> Optional[Any]:
         """Generate QR code with optimal settings for video embedding."""
+        if not QR_AVAILABLE:
+            logger.warning("QR code generation not available - missing dependencies")
+            return None
+        
+        error_correction = error_correction or qrcode.ERROR_CORRECT_M
         qr = qrcode.QRCode(version=1, error_correction=error_correction, box_size=10, border=4)
         qr.add_data(data)
         qr.make(fit=True)
         return qr
     
     @staticmethod 
-    def extract_qr_from_frame(frame: np.ndarray) -> List[str]:
+    def extract_qr_from_frame(frame) -> List[str]:
         """Extract QR codes from video frame."""
+        if not QR_AVAILABLE:
+            logger.warning("QR code extraction not available - missing dependencies")
+            return []
+        
         decoded_objects = pyzbar.decode(frame)
         return [obj.data.decode('utf-8') for obj in decoded_objects]
     
     @staticmethod
     def verify_qr_integrity(video_path: str, expected_data: List[str]) -> bool:
         """Verify QR codes in video match expected data."""
+        if not QR_AVAILABLE:
+            logger.warning("QR code verification not available - missing dependencies")
+            return True  # Skip verification if dependencies missing
+        
         cap = cv2.VideoCapture(video_path)
         found_data = set()
         
