@@ -135,3 +135,4 @@ node_modules/
 *.sln
 *.sw?
 # OS specificdata/embeddings_cache/
+data/
