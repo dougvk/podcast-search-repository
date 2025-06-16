@@ -119,20 +119,25 @@ print(response)
 from memvid import MemvidEncoder
 import os
 
-# Load documents
-encoder = MemvidEncoder(chunk_size=512, overlap=50)
+# Load documents with custom chunking
+config = {
+    "chunking": {
+        "chunk_size": 512,
+        "overlap": 50
+    }
+}
+encoder = MemvidEncoder(config=config)
 
-# Add text files
+# Add text files  
 for file in os.listdir("documents"):
     with open(f"documents/{file}", "r") as f:
-        encoder.add_text(f.read(), metadata={"source": file})
+        encoder.add_text(f.read())
 
 # Build optimized video
 encoder.build_video(
     "knowledge_base.mp4",
     "knowledge_index.json",
-    fps=30,  # Higher FPS = more chunks per second
-    frame_size=512  # Larger frames = more data per frame
+    codec='h265'  # Use H.265 codec for better compression
 )
 ```
 
@@ -155,11 +160,13 @@ print(context)
 
 ### Interactive Chat Interface
 ```python
-from memvid import MemvidInteractive
+from memvid import MemvidChat
 
-# Launch interactive chat UI
-interactive = MemvidInteractive("knowledge_base.mp4", "knowledge_index.json")
-interactive.run()  # Opens web interface at http://localhost:7860
+# Start interactive chat session
+chat = MemvidChat("knowledge_base.mp4", "knowledge_index.json")
+chat.start_session()
+response = chat.chat("Your question here")
+print(response)
 ```
 
 ### Testing with file_chat.py
@@ -220,11 +227,13 @@ python book_chat.py
 
 ### Custom Embeddings
 ```python
-from sentence_transformers import SentenceTransformer
-
-# Use custom embedding model
-custom_model = SentenceTransformer('sentence-transformers/all-mpnet-base-v2')
-encoder = MemvidEncoder(embedding_model=custom_model)
+# Use custom embedding model via config
+config = {
+    "embedding": {
+        "model_name": "sentence-transformers/all-mpnet-base-v2"
+    }
+}
+encoder = MemvidEncoder(config=config)
 ```
 
 ### Video Optimization
@@ -233,18 +242,15 @@ encoder = MemvidEncoder(embedding_model=custom_model)
 encoder.build_video(
     "compressed.mp4",
     "index.json",
-    fps=60,  # More frames per second
-    frame_size=256,  # Smaller frames
-    video_codec='h265',  # Better compression
-    crf=28  # Compression quality (lower = better quality)
+    codec='h265'  # H.265 codec for better compression
 )
 ```
 
 ### Distributed Processing
 ```python
-# Process large datasets in parallel
-encoder = MemvidEncoder(n_workers=8)
-encoder.add_chunks_parallel(massive_chunk_list)
+# Process large datasets
+encoder = MemvidEncoder()
+encoder.add_chunks(massive_chunk_list)
 ```
 
 ## 🐛 Troubleshooting

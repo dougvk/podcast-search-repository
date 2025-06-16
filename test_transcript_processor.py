@@ -45,8 +45,14 @@ Speaker 2: This could revolutionize how we handle large knowledge bases."""
     encoder.build_video("test_memory.mp4", "test_index.json")
     print("✓ Memory video created successfully")
     
-    # Cleanup
+    # Cleanup all test files
     os.remove("test_transcript.txt")
+    if os.path.exists("test_memory.mp4"):
+        os.remove("test_memory.mp4")
+    if os.path.exists("test_index.json"):
+        os.remove("test_index.json")
+    if os.path.exists("test_index.faiss"):
+        os.remove("test_index.faiss")
     
     print("\n🎉 All subtasks completed successfully!")
 
