@@ -380,6 +380,13 @@ class SearchEngine:
         
         return search_results
 
+    def direct_search(self, query: str, k: int = 10) -> List[SearchResult]:
+        """
+        Direct semantic search optimized for long natural language questions.
+        Bypasses all preprocessing and complexity - perfect for corpus queries.
+        """
+        return self.semantic_search(query, k)
+
     def hybrid_search(self, query: str, k: int = 10, alpha: float = 0.5) -> List[SearchResult]:
         """
         Perform hybrid search combining semantic and keyword search.
@@ -425,6 +432,94 @@ class SearchEngine:
         logger.debug(f"Search completed: '{query}' ({search_type}) in {search_time:.3f}s, {len(results)} results")
         
         return results
+
+    def preprocess_query(self, query: str) -> Dict[str, Any]:
+        """Preprocess and analyze query for optimization."""
+        # Normalize the query
+        processed_query = query.strip().lower()
+        tokens = processed_query.split() if processed_query else []
+        
+        # Determine intent
+        intent = 'general'
+        if not processed_query:
+            intent = 'empty'
+        elif query.strip().endswith('?'):
+            intent = 'question'
+        elif len(tokens) == 1:
+            intent = 'single_term'
+        elif len(tokens) > 8:
+            intent = 'long_query'
+        elif any(word in processed_query for word in ['error', 'bug', 'fix', 'solution']):
+            intent = 'exact_match'
+        elif any(word in processed_query for word in ['algorithm', 'neural', 'learning', 'network']):
+            intent = 'technical'
+        
+        # Determine search type
+        search_type = 'semantic'
+        if intent == 'empty':
+            search_type = 'none'
+        elif intent == 'single_term':
+            search_type = 'keyword'
+        elif intent in ['exact_match', 'technical'] or len(tokens) <= 3:
+            search_type = 'hybrid'
+        
+        # Generate expansions for short queries
+        expansions = []
+        if len(tokens) <= 2 and tokens:
+            # Simple expansion logic
+            expansion_map = {
+                'ml': ['machine learning', 'artificial intelligence'],
+                'ai': ['artificial intelligence', 'machine learning'],
+                'nn': ['neural network', 'neural networks'],
+                'dl': ['deep learning']
+            }
+            for token in tokens:
+                if token in expansion_map:
+                    expansions.extend(expansion_map[token])
+        
+        analysis = {
+            'original_query': query,
+            'processed': processed_query,
+            'tokens': tokens,
+            'intent': intent,
+            'search_type': search_type,
+            'expansions': expansions,
+            'is_empty': len(processed_query) == 0,
+            'is_question': query.strip().endswith('?'),
+            'word_count': len(tokens),
+            'is_single_word': len(tokens) == 1,
+            'needs_expansion': len(tokens) <= 2 and tokens
+        }
+        
+        return analysis
+
+    def smart_search(self, query: str, k: int = 10) -> Dict[str, Any]:
+        """Perform intelligent search using query preprocessing."""
+        import time
+        
+        start_time = time.time()
+        
+        # Preprocess the query to determine optimal search strategy
+        analysis = self.preprocess_query(query)
+        
+        # Use the recommended search type
+        search_type = analysis['search_type']
+        
+        if search_type == 'none':
+            results = []
+        else:
+            # Use the regular search method with the determined type
+            results = self.search(query, limit=k, search_type=search_type)
+        
+        processing_time = time.time() - start_time
+        
+        return {
+            'analysis': analysis,
+            'search_method': search_type,
+            'processing_time': processing_time,
+            'result_count': len(results),
+            'results': results
+        }
 
     def get_stats(self) -> Dict[str, Any]:
         """Get search engine statistics."""

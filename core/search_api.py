@@ -10,6 +10,7 @@ import uuid
 from pathlib import Path
 from memvid import MemvidRetriever
 from core.models import Episode
+from .cache_manager import get_cache_manager, CacheConfig
 
 # Configure logging
 logging.basicConfig(
@@ -24,6 +25,9 @@ app = FastAPI(
     description="Natural language search for transcript chunks",
     version="1.0.0"
 )
+
+# Initialize cache manager
+cache = get_cache_manager()
 
 # Request logging middleware
 @app.middleware("http")
@@ -81,6 +85,8 @@ class SearchResponse(BaseModel):
     results: List[SearchResult] = Field(..., description="Search results")
     total_found: int = Field(..., ge=0, description="Total number of results found")
     execution_time_ms: float = Field(..., ge=0, description="Query execution time in milliseconds")
+    cache_hit: bool = Field(default=False, description="Whether result came from cache")
+    correlation_id: str = Field(description="Request correlation ID")
 
 class HealthResponse(BaseModel):
     """Health check response model"""
@@ -150,16 +156,91 @@ async def search_transcripts(request: SearchRequest, http_request: Request):
                 logger.error(f"[{correlation_id}] Search engine initialization failed")
                 raise HTTPException(status_code=503, detail="Search engine not available")
         
-        # Perform search
-        raw_results = retriever.search(request.query, top_k=request.limit * 2)  # Get extra for deduplication
+        # Check cache first
+        cached_results = cache.get_search_results(request.query, request.limit, request.threshold)
+        cache_hit = cached_results is not None
         
-        # Convert to our format and filter by threshold
+        if cache_hit:
+            final_results = cached_results
+            formatted_results = cached_results  # For total_found calculation
+            logger.info(f"[{correlation_id}] Cache HIT")
+        else:
+            # Perform search
+            raw_results = retriever.search(request.query, top_k=request.limit * 2)  # Get extra for deduplication
+            
+            # Convert to our format and filter by threshold
+            formatted_results = []
+            for text, score in raw_results:
+                if score >= request.threshold:
+                    # Extract episode metadata (simplified)
+                    episode_meta = EpisodeMetadata(
+                        filename="transcript.txt",  # Default for now
+                        title=None,
+                        speaker=None,
+                        timestamp=None
+                    )
+                    
+                    formatted_results.append({
+                        'text': text,
+                        'score': float(score),
+                        'episode': episode_meta
+                    })
+            
+            # Deduplicate results
+            unique_results = deduplicate_results(formatted_results)
+            
+            # Limit to requested amount
+            final_results = unique_results[:request.limit]
+            
+            # Cache the results (final_results are already dicts)
+            cache.cache_search_results(request.query, final_results, request.limit, request.threshold)
+            logger.info(f"[{correlation_id}] Cache MISS - results cached")
+        
+        execution_time = (time.time() - start_time) * 1000  # Convert to ms
+        
+        logger.info(f"[{correlation_id}] Search completed: {len(final_results)} results in {execution_time:.1f}ms")
+        
+        return SearchResponse(
+            query=request.query,
+            results=[SearchResult(**result) for result in final_results],
+            total_found=len(formatted_results),
+            execution_time_ms=execution_time,
+            cache_hit=cache_hit,
+            correlation_id=correlation_id
+        )
+        
+    except HTTPException:
+        raise  # Re-raise HTTPExceptions as-is
+    except Exception as e:
+        logger.error(f"[{correlation_id}] Search failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
+
+@api_router.post("/search/simple", response_model=SearchResponse)
+async def simple_search(request: SearchRequest, http_request: Request):
+    """
+    Simple direct semantic search optimized for long natural language questions.
+    Bypasses all preprocessing complexity - perfect for corpus queries.
+    """
+    correlation_id = getattr(http_request.state, 'correlation_id', 'unknown')
+    start_time = time.time()
+    
+    logger.info(f"[{correlation_id}] Simple search query: '{request.query}' (limit={request.limit})")
+    
+    try:
+        if not retriever:
+            if not initialize_search_engine():
+                logger.error(f"[{correlation_id}] Search engine initialization failed")
+                raise HTTPException(status_code=503, detail="Search engine not available")
+        
+        # Use direct search (semantic only, no preprocessing)
+        raw_results = retriever.search(request.query, top_k=request.limit)
+        
+        # Convert to our format
         formatted_results = []
         for text, score in raw_results:
             if score >= request.threshold:
-                # Extract episode metadata (simplified)
                 episode_meta = EpisodeMetadata(
-                    filename="transcript.txt",  # Default for now
+                    filename="transcript.txt",
                     title=None,
                     speaker=None,
                     timestamp=None
@@ -171,28 +252,24 @@ async def search_transcripts(request: SearchRequest, http_request: Request):
                     'episode': episode_meta
                 })
         
-        # Deduplicate results
-        unique_results = deduplicate_results(formatted_results)
+        execution_time = (time.time() - start_time) * 1000
         
-        # Limit to requested amount
-        final_results = unique_results[:request.limit]
-        
-        execution_time = (time.time() - start_time) * 1000  # Convert to ms
-        
-        logger.info(f"[{correlation_id}] Search completed: {len(final_results)} results in {execution_time:.1f}ms")
+        logger.info(f"[{correlation_id}] Simple search completed: {len(formatted_results)} results in {execution_time:.1f}ms")
         
         return SearchResponse(
             query=request.query,
-            results=[SearchResult(**result) for result in final_results],
+            results=[SearchResult(**result) for result in formatted_results],
             total_found=len(formatted_results),
-            execution_time_ms=execution_time
+            execution_time_ms=execution_time,
+            cache_hit=False,  # Simple search doesn't use cache for maximum simplicity
+            correlation_id=correlation_id
         )
         
     except HTTPException:
-        raise  # Re-raise HTTPExceptions as-is
+        raise
     except Exception as e:
-        logger.error(f"[{correlation_id}] Search failed: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
+        logger.error(f"[{correlation_id}] Simple search failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Simple search failed: {str(e)}")
 
 @api_router.get("/health", response_model=HealthResponse)
 async def health_check():
@@ -238,6 +315,33 @@ async def system_info():
         "available_videos": len(video_files),
         "data_directory": str(data_dir.absolute())
     }
+
+@api_router.get("/ready")
+async def readiness_check():
+    """Readiness check with cache status"""
+    cache_stats = cache.stats()
+    return {
+        "status": "ready",
+        "cache": {
+            "memory_active": cache_stats["memory"]["active"],
+            "redis_connected": cache_stats["redis"]["connected"]
+        },
+        "timestamp": datetime.now().isoformat()
+    }
+
+@api_router.get("/metrics")
+async def system_metrics():
+    """System metrics including cache performance"""
+    return {
+        "cache": cache.stats(),
+        "timestamp": datetime.now().isoformat()
+    }
+
+@api_router.delete("/cache")
+async def clear_cache():
+    """Clear all cached data"""
+    cache.clear()
+    return {"status": "cache cleared", "timestamp": datetime.now().isoformat()}
 
 # Include router
 app.include_router(api_router)

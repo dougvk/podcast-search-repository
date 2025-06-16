@@ -7,6 +7,7 @@ Validates all functionality with memvid's proven approach.
 import sys
 import os
 import time
+import pytest
 from pathlib import Path
 
 # Import our refactored search engine
@@ -34,11 +35,12 @@ def test_memvid_integration():
         print(f"✅ Generated embedding: {len(embedding)}D vector")
         print(f"   Sample values: {embedding[:5]}...")
         
-        return True
+        assert len(embedding) > 0, "Embedding should have dimensions"
+        assert isinstance(embedding, list), "Embedding should be a list"
         
     except Exception as e:
         print(f"❌ Memvid integration failed: {e}")
-        return False
+        pytest.fail(f"Memvid integration test failed: {e}")
 
 def test_real_semantic_search():
     """Test semantic search with real embeddings."""
@@ -118,14 +120,16 @@ def test_real_semantic_search():
             for i, result in enumerate(results, 1):
                 print(f"   {i}. {result.id} (score: {result.score:.3f})")
                 print(f"      {result.text[:60]}...")
-        
-        return True
+                
+                assert result.score >= 0, "Score should be non-negative"
+                assert result.id, "Result should have an ID"
+                assert result.text, "Result should have text"
         
     except Exception as e:
         print(f"❌ Semantic search test failed: {e}")
         import traceback
         traceback.print_exc()
-        return False
+        pytest.fail(f"Semantic search test failed: {e}")
 
 def test_performance_optimizations():
     """Test performance optimizations with real embeddings."""
@@ -182,13 +186,14 @@ def test_performance_optimizations():
         for key, value in stats.items():
             print(f"   {key}: {value}")
         
-        return True
+        assert 'total_documents' in stats, "Stats should include total_documents"
+        assert stats.get('is_ready', False), "Engine should be ready"
         
     except Exception as e:
         print(f"❌ Performance test failed: {e}")
         import traceback
         traceback.print_exc()
-        return False
+        pytest.fail(f"Performance test failed: {e}")
 
 def test_search_quality():
     """Test search quality with real embeddings."""
@@ -232,6 +237,8 @@ def test_search_quality():
         ]
         
         print("🔍 Quality Test Results:")
+        quality_results = []
+        
         for test_case in test_cases:
             query = test_case['query']
             expected = test_case['expected_categories']
@@ -243,6 +250,7 @@ def test_search_quality():
             # Check if top results match expected categories
             matches = sum(1 for id in top_ids if id in expected)
             quality_score = matches / len(expected) if expected else 0
+            quality_results.append((query, quality_score))
             
             print(f"\n   Query: '{query}'")
             print(f"   {description}")
@@ -255,13 +263,14 @@ def test_search_quality():
             else:
                 print("   ⚠️  Semantic matching could be improved")
         
-        return True
+        # Assert overall quality is reasonable
+        assert any(q[1] >= 0.3 for q in quality_results), "At least one query should have decent quality"
         
     except Exception as e:
         print(f"❌ Quality test failed: {e}")
         import traceback
         traceback.print_exc()
-        return False
+        pytest.fail(f"Quality test failed: {e}")
 
 def main():
     """Run all tests for the refactored search engine."""

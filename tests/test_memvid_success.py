@@ -5,6 +5,7 @@ import sys
 import os
 from pathlib import Path
 import time
+import pytest
 
 # Import memvid
 try:
@@ -88,7 +89,7 @@ def test_memvid_semantic_search():
         print(f"✅ Memvid embedding model ready: {type(embedding_model)}")
     except Exception as e:
         print(f"❌ Failed to initialize memvid model: {e}")
-        return False
+        pytest.fail(f"Failed to initialize memvid model: {e}")
     
     # Generate document embeddings
     print("\n📊 Generating Document Embeddings...")
@@ -176,7 +177,11 @@ def test_memvid_semantic_search():
     print(f"⏱️  Total embedding time: {embedding_time:.3f}s")
     print(f"⏱️  Index build time: {build_time:.3f}s")
     
-    return True
+    # Assertions to validate the test passed
+    assert len(embeddings) > 0, "Should generate embeddings"
+    assert len(embeddings[0]) > 0, "Embeddings should have dimensions"
+    assert embedding_time < 10.0, "Embedding generation should be reasonably fast"
+    assert build_time < 5.0, "Index building should be reasonably fast"
 
 def main():
     """Run the focused memvid success test."""

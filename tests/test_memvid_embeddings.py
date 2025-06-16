@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import time
 import json
+import pytest
 
 # Add memvid to path (assuming it's installed)
 try:
@@ -106,7 +107,7 @@ def test_memvid_embeddings_integration():
     
     if not embeddings:
         print("❌ Failed to generate embeddings")
-        return False
+        pytest.fail("Failed to generate embeddings")
     
     print(f"⏱️  Embedding generation: {embedding_time:.3f}s")
     print(f"📊 Embedding dimensions: {len(embeddings[0])}D")
@@ -195,7 +196,9 @@ def test_memvid_embeddings_integration():
     print(f"🔍 Search engine: Ready with real embeddings!")
     print(f"✅ No segmentation faults - memvid approach works!")
     
-    return True
+    # Assertions to validate the test passed
+    assert len(embeddings) > 0, "Should generate embeddings"
+    assert len(embeddings[0]) > 0, "Embeddings should have dimensions"
 
 def test_memvid_config_compatibility():
     """Test compatibility with memvid's configuration system."""
@@ -222,11 +225,11 @@ def test_memvid_config_compatibility():
             print(f"🏗️  Index config: type={index_config.get('type')}")
         
         print("✅ Configuration compatibility confirmed")
-        return True
+        assert 'embedding' in config or 'chunking' in config, "Config should have expected sections"
         
     except Exception as e:
         print(f"❌ Configuration test failed: {e}")
-        return False
+        pytest.fail(f"Configuration test failed: {e}")
 
 def test_memvid_encoder_internals():
     """Test accessing memvid encoder internals to understand the architecture."""
@@ -250,7 +253,8 @@ def test_memvid_encoder_internals():
                 embedding = model.encode(test_text)
                 print(f"✅ Test embedding shape: {embedding.shape}")
                 print(f"✅ Test embedding type: {type(embedding)}")
-                return True
+                assert hasattr(embedding, 'shape'), "Embedding should have shape attribute"
+                return
             except Exception as e:
                 print(f"❌ Test encoding failed: {e}")
         else:
@@ -273,7 +277,8 @@ def test_memvid_encoder_internals():
                     embedding = model.encode(test_text)
                     print(f"✅ Test embedding shape: {embedding.shape}")
                     print(f"✅ Test embedding type: {type(embedding)}")
-                    return True
+                    assert hasattr(embedding, 'shape'), "Embedding should have shape attribute"
+                    return
                 except Exception as e:
                     print(f"❌ Test encoding failed: {e}")
             
@@ -289,14 +294,14 @@ def test_memvid_encoder_internals():
                         embeddings = index_mgr.generate_embeddings(test_texts)
                         print(f"✅ Generated embeddings via index manager: {len(embeddings)} embeddings")
                         print(f"✅ Embedding shape: {len(embeddings[0])}D")
-                        return True
+                        assert len(embeddings) > 0, "Should generate embeddings"
+                        return
                     except Exception as e:
                         print(f"❌ generate_embeddings failed: {e}")
             
     except Exception as e:
         print(f"❌ Encoder inspection failed: {e}")
-    
-    return False
+        pytest.fail(f"Encoder inspection failed: {e}")
 
 def main():
     """Run memvid embedding integration tests."""

@@ -7,6 +7,7 @@ Tests storage manager, embeddings, and search engine for consistency.
 import sys
 import os
 import time
+import pytest
 from pathlib import Path
 import tempfile
 import shutil
@@ -41,7 +42,7 @@ def test_memvid_availability():
     else:
         print("❌ Memvid not available in some tasks")
     
-    return all_available
+    assert all_available, "Memvid should be available across all tasks"
 
 def test_task1_storage_memvid_patterns():
     """Test Task 1 (Storage Manager) follows memvid best practices."""
@@ -84,13 +85,13 @@ def test_task1_storage_memvid_patterns():
             # Just validate the setup is correct
             print("✅ Storage Manager memvid integration validated")
         
-        return True
+        assert storage.memvid_encoder is not None, "Storage manager should have memvid encoder"
         
     except Exception as e:
         print(f"❌ Task 1 test failed: {e}")
         import traceback
         traceback.print_exc()
-        return False
+        pytest.fail(f"Task 1 storage test failed: {e}")
 
 def test_task2_embeddings_memvid_patterns():
     """Test Task 2 (Embeddings) follows memvid best practices."""
@@ -136,13 +137,14 @@ def test_task2_embeddings_memvid_patterns():
             similarity = generator.get_similarity(test_texts[0], test_texts[1])
             print(f"✅ Similarity calculation: {similarity:.3f}")
             
-        return True
+        assert len(embeddings) > 0, "Should generate embeddings"
+        assert similarity >= -1 and similarity <= 1, "Similarity should be valid"
         
     except Exception as e:
         print(f"❌ Task 2 test failed: {e}")
         import traceback
         traceback.print_exc()
-        return False
+        pytest.fail(f"Task 2 embeddings test failed: {e}")
 
 def test_task3_search_engine_memvid_patterns():
     """Test Task 3 (Search Engine) follows memvid best practices."""
@@ -183,19 +185,19 @@ def test_task3_search_engine_memvid_patterns():
         
         if len(results) == 0:
             print("❌ No search results returned")
-            return False
-        
-        print(f"✅ Semantic search: {len(results)} results")
+        else:
+            print(f"✅ Semantic search: {len(results)} results")
         for i, result in enumerate(results, 1):
             print(f"   {i}. {result.id} (score: {result.score:.3f})")
         
-        return True
+        assert len(results) > 0, "Search should return results"
+        assert all(hasattr(r, 'score') for r in results), "Results should have scores"
         
     except Exception as e:
         print(f"❌ Task 3 test failed: {e}")
         import traceback
         traceback.print_exc()
-        return False
+        pytest.fail(f"Task 3 search engine test failed: {e}")
 
 def test_cross_task_consistency():
     """Test that all tasks use consistent memvid patterns."""
@@ -217,26 +219,27 @@ def test_cross_task_consistency():
         # Check dimensions match
         if len(emb_task2) != len(emb_task3):
             print(f"❌ Dimension mismatch: Task 2 ({len(emb_task2)}D) vs Task 3 ({len(emb_task3)}D)")
-            return False
-        
-        print(f"✅ Consistent embedding dimensions: {len(emb_task2)}D")
+        else:
+            print(f"✅ Consistent embedding dimensions: {len(emb_task2)}D")
         
         # Check similarity (should be very high for same text)
         similarity = sum(a * b for a, b in zip(emb_task2, emb_task3))
         
         if similarity < 0.99:  # Should be nearly identical
             print(f"❌ Low similarity between tasks: {similarity:.3f}")
-            return False
+        else:
+            print(f"✅ High cross-task similarity: {similarity:.3f}")
         
         print(f"✅ High cross-task similarity: {similarity:.3f}")
         
-        return True
+        assert len(emb_task2) == len(emb_task3), "Embedding dimensions should match"
+        assert similarity >= 0.99, "Cross-task embeddings should be nearly identical"
         
     except Exception as e:
         print(f"❌ Cross-task consistency test failed: {e}")
         import traceback
         traceback.print_exc()
-        return False
+        pytest.fail(f"Cross-task consistency test failed: {e}")
 
 def test_environment_variables():
     """Test that memvid best practices environment variables are set."""
@@ -246,10 +249,9 @@ def test_environment_variables():
     
     if tokenizers_parallelism != 'false':
         print(f"❌ TOKENIZERS_PARALLELISM should be 'false', got: {tokenizers_parallelism}")
-        return False
     
     print("✅ TOKENIZERS_PARALLELISM set to 'false' (memvid best practice)")
-    return True
+    assert tokenizers_parallelism == 'false', "TOKENIZERS_PARALLELISM should be set to 'false' for memvid best practices"
 
 def main():
     """Run all memvid compliance tests."""

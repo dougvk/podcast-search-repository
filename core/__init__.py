@@ -12,6 +12,7 @@ from .batch_processor import (
     DeltaTracker, IncrementalProcessor, ResilientProcessor,
     ProgressTracker, ReportGenerator, MemvidBatchProcessor
 )
+from .cache_manager import CacheManager, CacheConfig, get_cache_manager, init_cache
 
 __version__ = "0.1.0"
 
@@ -19,5 +20,6 @@ __all__ = [
     'app', 'SearchRequest', 'SearchResponse', 'SearchResult',
     'ProcessingConfig', 'MemoryMonitor', 'StreamingProcessor',
     'DeltaTracker', 'IncrementalProcessor', 'ResilientProcessor', 
-    'ProgressTracker', 'ReportGenerator', 'MemvidBatchProcessor'
+    'ProgressTracker', 'ReportGenerator', 'MemvidBatchProcessor',
+    'CacheManager', 'CacheConfig', 'get_cache_manager', 'init_cache'
 ]

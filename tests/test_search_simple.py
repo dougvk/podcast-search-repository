@@ -4,25 +4,21 @@
 import sys
 import os
 import numpy as np
+import pytest
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from core.search_engine import SearchEngine, FAISSConfig
+from core.search_engine import SearchEngine
 
 def test_faiss_simple():
     """Test FAISS index with fake embeddings."""
     print("🔍 Testing FAISS Index (Simple)...")
     
-    # Test index type selection
-    print("\n📊 Testing index type selection:")
-    index = FAISSConfig.get_optimal_index(50, 384)
-    print(f"  Index type: {type(index).__name__}")
-    
     # Test search engine initialization
     print("\n🚀 Testing SearchEngine:")
     engine = SearchEngine()
-    print(f"  ✅ Engine initialized: {engine.is_ready}")
+    print(f"  ✅ Engine initialized")
     
     # Create fake embeddings (384D)
     print("\n🔨 Testing with fake embeddings:")
@@ -47,8 +43,20 @@ def test_faiss_simple():
         engine.build_index(embeddings, documents)
         print(f"  ✅ Index built successfully")
         print(f"  📊 Stats: {engine.get_stats()}")
+        
+        # Test basic search functionality
+        print("\n🔍 Testing search:")
+        
+        # Test with a simple query 
+        results = engine.search("sample content", limit=3, search_type='semantic')
+        print(f"  ✅ Search returned {len(results)} results")
+        
+        if results:
+            print(f"  📊 Top result score: {results[0].score:.3f}")
+        
     except Exception as e:
         print(f"  ❌ Error building index: {e}")
+        pytest.fail(f"Simple FAISS test failed: {e}")
     
     print("\n🎉 Simple FAISS test complete!")
 
