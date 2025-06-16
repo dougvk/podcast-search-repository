@@ -11,6 +11,11 @@ from pathlib import Path
 from memvid import MemvidRetriever
 from core.models import Episode
 from .cache_manager import get_cache_manager, CacheConfig
+from .index_optimizer import IndexOptimizer, IndexConfig, create_optimized_index
+from .embedding_manager import get_embedding_manager
+from .async_handler import get_async_handler, ConcurrentSearchProcessor
+from .performance_monitor import get_profiler, BottleneckDetector, track_endpoint_performance, profile
+from .system_tuner import get_system_tuner, auto_tune_system, optimize_for_search
 
 # Configure logging
 logging.basicConfig(
@@ -26,8 +31,14 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Initialize cache manager
+# Initialize cache manager, index optimizer, embedding manager, async handler, and profiler
 cache = get_cache_manager()
+index_optimizer = None
+embedding_manager = get_embedding_manager()
+async_handler = get_async_handler()
+profiler = get_profiler()
+bottleneck_detector = BottleneckDetector(profiler)
+system_tuner = get_system_tuner(profiler)
 
 # Request logging middleware
 @app.middleware("http")
@@ -65,6 +76,17 @@ class SearchRequest(BaseModel):
     @classmethod
     def validate_query(cls, v):
         return v.strip()
+
+class BatchSearchRequest(BaseModel):
+    """Batch search request model"""
+    queries: List[str] = Field(..., min_length=1, max_length=50, description="List of search queries")
+    limit: int = Field(20, ge=1, le=100, description="Maximum results per query")
+    threshold: float = Field(0.0, ge=0.0, le=1.0, description="Minimum relevance score threshold")
+    
+    @field_validator('queries')
+    @classmethod
+    def validate_queries(cls, v):
+        return [q.strip() for q in v if q.strip()]
 
 class EpisodeMetadata(BaseModel):
     """Episode metadata model"""
@@ -198,6 +220,9 @@ async def search_transcripts(request: SearchRequest, http_request: Request):
         
         execution_time = (time.time() - start_time) * 1000  # Convert to ms
         
+        # Track endpoint performance
+        track_endpoint_performance("/search", start_time, error=False)
+        
         logger.info(f"[{correlation_id}] Search completed: {len(final_results)} results in {execution_time:.1f}ms")
         
         return SearchResponse(
@@ -210,8 +235,10 @@ async def search_transcripts(request: SearchRequest, http_request: Request):
         )
         
     except HTTPException:
+        track_endpoint_performance("/search", start_time, error=True)
         raise  # Re-raise HTTPExceptions as-is
     except Exception as e:
+        track_endpoint_performance("/search", start_time, error=True)
         logger.error(f"[{correlation_id}] Search failed: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
 
@@ -342,6 +369,322 @@ async def clear_cache():
     """Clear all cached data"""
     cache.clear()
     return {"status": "cache cleared", "timestamp": datetime.now().isoformat()}
+
+@api_router.get("/index/optimize")
+async def optimize_index():
+    """Optimize FAISS index parameters for current dataset"""
+    global index_optimizer
+    
+    if not retriever:
+        raise HTTPException(status_code=503, detail="Search engine not available")
+    
+    try:
+        # Get sample embeddings from retriever if available
+        if hasattr(retriever, 'embeddings') and retriever.embeddings is not None:
+            embeddings = retriever.embeddings
+            
+            if index_optimizer is None:
+                index_optimizer = IndexOptimizer(dimension=embeddings.shape[1])
+            
+            # Auto-configure and optimize
+            config = index_optimizer.auto_configure(len(embeddings), embeddings[:100])
+            stats = index_optimizer.build_index(embeddings, config)
+            
+            # Optimize search parameters
+            sample_queries = embeddings[:min(50, len(embeddings))]
+            optimization_results = index_optimizer.optimize_search_params(sample_queries)
+            
+            return {
+                "status": "optimized",
+                "index_stats": stats,
+                "optimization_results": optimization_results,
+                "recommendations": {
+                    "index_type": config.index_type.value,
+                    "optimal_nprobe": optimization_results.get("optimized_nprobe"),
+                    "estimated_speedup": f"{config.nlist / optimization_results.get('optimized_nprobe', 1):.1f}x"
+                },
+                "timestamp": datetime.now().isoformat()
+            }
+        else:
+            raise HTTPException(status_code=503, detail="No embeddings available for optimization")
+            
+    except Exception as e:
+        logger.error(f"Index optimization failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Optimization failed: {str(e)}")
+
+@api_router.get("/index/stats")
+async def get_index_stats():
+    """Get current index performance statistics"""
+    global index_optimizer
+    
+    if index_optimizer is None:
+        return {"status": "no_optimizer", "message": "Index optimizer not initialized"}
+    
+    stats = index_optimizer.get_stats()
+    
+    return {
+        "index_stats": stats,
+        "performance_metrics": {
+            "searches_per_second": stats.get("searches", 0) / max(stats.get("optimization_time", 1), 1),
+            "avg_build_time": stats.get("optimization_time", 0) / max(stats.get("builds", 1), 1),
+            "total_operations": stats.get("searches", 0) + stats.get("builds", 0)
+        },
+        "timestamp": datetime.now().isoformat()
+    }
+
+@api_router.post("/index/tune")
+async def tune_index_parameters(target_recall: float = 0.9):
+    """Automatically tune index parameters for target recall"""
+    global index_optimizer
+    
+    if index_optimizer is None or index_optimizer.index is None:
+        raise HTTPException(status_code=503, detail="Index optimizer not available")
+    
+    if not (0.5 <= target_recall <= 1.0):
+        raise HTTPException(status_code=400, detail="Target recall must be between 0.5 and 1.0")
+    
+    try:
+        # Use sample queries from embeddings
+        if hasattr(retriever, 'embeddings') and retriever.embeddings is not None:
+            sample_queries = retriever.embeddings[:min(100, len(retriever.embeddings))]
+            results = index_optimizer.optimize_search_params(sample_queries, target_recall)
+            
+            return {
+                "status": "tuned",
+                "target_recall": target_recall,
+                "optimization_results": results,
+                "timestamp": datetime.now().isoformat()
+            }
+        else:
+            raise HTTPException(status_code=503, detail="No sample data available for tuning")
+            
+    except Exception as e:
+        logger.error(f"Parameter tuning failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Tuning failed: {str(e)}")
+
+@api_router.post("/search/batch")
+async def batch_search(request: BatchSearchRequest, http_request: Request):
+    """Process multiple search queries concurrently"""
+    correlation_id = getattr(http_request.state, 'correlation_id', 'unknown')
+    start_time = time.time()
+    
+    logger.info(f"[{correlation_id}] Batch search: {len(request.queries)} queries")
+    
+    try:
+        if not retriever:
+            if not initialize_search_engine():
+                raise HTTPException(status_code=503, detail="Search engine not available")
+        
+        # Define search function for concurrent processing
+        def search_single(query: str) -> List[tuple]:
+            return retriever.search(query, top_k=request.limit * 2)
+        
+        # Process queries concurrently
+        processor = ConcurrentSearchProcessor(search_single, max_concurrent=10)
+        concurrent_results = await processor.search_concurrent(request.queries)
+        
+        # Format all results
+        formatted_responses = []
+        for i, result in enumerate(concurrent_results):
+            query = request.queries[i]
+            
+            if "error" in result:
+                formatted_responses.append({
+                    "query": query,
+                    "results": [],
+                    "total_found": 0,
+                    "error": result["error"]
+                })
+            else:
+                # Process search results
+                raw_results = result["results"]
+                formatted_results = []
+                
+                for text, score in raw_results:
+                    if score >= request.threshold:
+                        episode_meta = EpisodeMetadata(
+                            filename="transcript.txt",
+                            title=None,
+                            speaker=None,
+                            timestamp=None
+                        )
+                        formatted_results.append({
+                            'text': text,
+                            'score': float(score),
+                            'episode': episode_meta
+                        })
+                
+                # Deduplicate and limit results
+                unique_results = deduplicate_results(formatted_results)
+                final_results = unique_results[:request.limit]
+                
+                formatted_responses.append({
+                    "query": query,
+                    "results": [SearchResult(**result) for result in final_results],
+                    "total_found": len(final_results)
+                })
+        
+        execution_time = (time.time() - start_time) * 1000
+        
+        return {
+            "batch_results": formatted_responses,
+            "total_queries": len(request.queries),
+            "execution_time_ms": execution_time,
+            "correlation_id": correlation_id,
+            "concurrent_stats": processor.get_stats()
+        }
+        
+    except Exception as e:
+        logger.error(f"[{correlation_id}] Batch search failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Batch search failed: {str(e)}")
+
+@api_router.get("/async/stats")
+async def get_async_stats():
+    """Get async handler performance statistics"""
+    try:
+        handler_stats = async_handler.get_stats()
+        return {
+            "async_handler": handler_stats,
+            "timestamp": time.time()
+        }
+    except Exception as e:
+        logger.error(f"Async stats error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get async stats: {str(e)}")
+
+@api_router.get("/performance/metrics")
+async def get_performance_metrics(duration: int = 300):
+    """Get system performance metrics and bottleneck analysis"""
+    try:
+        summary = profiler.get_metrics_summary(duration)
+        current_metrics = profiler.get_current_metrics()
+        bottlenecks = bottleneck_detector.check_performance_issues()
+        
+        return {
+            "performance_summary": summary,
+            "current_metrics": current_metrics.__dict__ if current_metrics else None,
+            "active_bottlenecks": bottlenecks,
+            "monitoring_active": profiler._monitoring,
+            "timestamp": time.time()
+        }
+    except Exception as e:
+        logger.error(f"Performance metrics error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get performance metrics: {str(e)}")
+
+@api_router.post("/performance/export")
+async def export_performance_data(duration: int = 3600, filename: Optional[str] = None):
+    """Export performance data to file"""
+    try:
+        if not filename:
+            filename = f"performance_export_{int(time.time())}.json"
+        
+        filepath = f"data/{filename}"
+        os.makedirs("data", exist_ok=True)
+        
+        profiler.export_metrics(filepath, duration)
+        
+        return {
+            "exported": True,
+            "filepath": filepath,
+            "duration_seconds": duration,
+            "timestamp": time.time()
+        }
+    except Exception as e:
+        logger.error(f"Performance export error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to export performance data: {str(e)}")
+
+@api_router.get("/system/tune")
+async def auto_tune_system():
+    """Auto-tune system parameters based on performance data"""
+    try:
+        metrics = profiler.get_metrics_summary(300)  # Last 5 minutes
+        bottlenecks = bottleneck_detector.check_performance_issues()
+        
+        # Auto-tune based on current state
+        recommendations = system_tuner.auto_tune(metrics, bottlenecks)
+        
+        return {
+            "tuning_applied": recommendations,
+            "current_config": system_tuner.get_current_config().__dict__,
+            "performance_metrics": metrics,
+            "bottlenecks_resolved": len([b for b in bottlenecks if b["severity"] == "resolved"]),
+            "timestamp": time.time()
+        }
+    except Exception as e:
+        logger.error(f"Auto-tune failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Auto-tune failed: {str(e)}")
+
+@api_router.post("/system/optimize")
+async def optimize_system(optimization_type: str = "search"):
+    """Apply specific optimization profiles"""
+    try:
+        if optimization_type == "search":
+            result = optimize_for_search(system_tuner, profiler)
+        elif optimization_type == "batch":
+            result = system_tuner.optimize_for_batch_processing()
+        elif optimization_type == "memory":
+            result = system_tuner.optimize_for_memory_efficiency()
+        else:
+            raise ValueError(f"Unknown optimization type: {optimization_type}")
+        
+        return {
+            "optimization_applied": optimization_type,
+            "changes": result,
+            "new_config": system_tuner.get_current_config().__dict__,
+            "estimated_improvement": system_tuner.estimate_performance_gain(),
+            "timestamp": time.time()
+        }
+    except Exception as e:
+        logger.error(f"System optimization failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Optimization failed: {str(e)}")
+
+@api_router.get("/system/status")
+async def get_system_status():
+    """Get comprehensive system health and configuration status"""
+    try:
+        current_metrics = profiler.get_current_metrics()
+        bottlenecks = bottleneck_detector.check_performance_issues()
+        config = system_tuner.get_current_config()
+        
+        # Calculate system health score
+        health_score = system_tuner.calculate_health_score(current_metrics, bottlenecks)
+        
+        return {
+            "health_score": health_score,
+            "status": "optimal" if health_score > 0.8 else "degraded" if health_score > 0.5 else "critical",
+            "current_metrics": current_metrics.__dict__ if current_metrics else None,
+            "active_bottlenecks": bottlenecks,
+            "system_config": config.__dict__,
+            "uptime_seconds": profiler.get_uptime(),
+            "last_tuning": system_tuner.get_last_tuning_time(),
+            "timestamp": time.time()
+        }
+    except Exception as e:
+        logger.error(f"System status check failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Status check failed: {str(e)}")
+
+@api_router.get("/embeddings/stats")
+async def get_embedding_stats():
+    """Get embedding compression and memory statistics"""
+    try:
+        stats = embedding_manager.get_stats()
+        return {"embedding_stats": stats, "timestamp": time.time()}
+    except Exception as e:
+        logger.error(f"Embedding stats error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get embedding stats: {str(e)}")
+
+@api_router.post("/embeddings/unload")
+async def unload_embeddings(key: Optional[str] = None):
+    """Unload embeddings from memory to free up space"""
+    try:
+        if key:
+            embedding_manager.unload_embeddings(key)
+            return {"message": f"Unloaded embeddings: {key}"}
+        else:
+            embedding_manager.unload_all()
+            return {"message": "Unloaded all embeddings"}
+    except Exception as e:
+        logger.error(f"Embedding unload error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to unload embeddings: {str(e)}")
 
 # Include router
 app.include_router(api_router)
