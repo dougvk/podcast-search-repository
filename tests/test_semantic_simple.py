@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
 """Simple semantic search test with fake embeddings."""
 
+import sys
+import os
 import numpy as np
+
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from core.search_engine import SearchEngine, SearchResult
 
 def test_semantic_search_simple():

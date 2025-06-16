@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
 """Simple test for FAISS index without embeddings."""
 
+import sys
+import os
 import numpy as np
+
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from core.search_engine import SearchEngine, FAISSConfig
 
 def test_faiss_simple():

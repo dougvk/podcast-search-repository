@@ -11,6 +11,9 @@ from pathlib import Path
 import tempfile
 import shutil
 
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 # Import all our refactored components
 from core.storage import StorageManager, MemvidConfig, Chunk, MEMVID_AVAILABLE as STORAGE_MEMVID
 from core.embeddings import EmbeddingGenerator, MEMVID_AVAILABLE as EMBEDDINGS_MEMVID

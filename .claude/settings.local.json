@@ -11,7 +11,8 @@
       "WebFetch(domain:github.com)",
       "Bash(task-master show:*)",
       "Bash(git add:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(mv:*)"
     ],
     "deny": []
   }

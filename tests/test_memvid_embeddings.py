@@ -17,6 +17,9 @@ except ImportError as e:
     print("Please install memvid: pip install memvid")
     sys.exit(1)
 
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 # Import our search engine
 from core.search_engine import SearchEngine
 
