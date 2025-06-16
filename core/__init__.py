@@ -6,5 +6,6 @@ Contains the fundamental components for video encoding, embeddings, search, stor
 
 from .transcript_processor import TranscriptProcessor
 from .models import Episode, Chunk
+from .search_api import app
 
 __version__ = "0.1.0"
