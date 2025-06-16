@@ -12,7 +12,8 @@
       "Bash(task-master show:*)",
       "Bash(git add:*)",
       "Bash(git push:*)",
-      "Bash(mv:*)"
+      "Bash(mv:*)",
+      "Bash(grep:*)"
     ],
     "deny": []
   }
