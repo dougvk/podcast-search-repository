@@ -8,6 +8,7 @@ import os
 import logging
 import uuid
 from pathlib import Path
+from datetime import datetime
 from memvid import MemvidRetriever
 from core.models import Episode
 from .cache_manager import get_cache_manager, CacheConfig
@@ -16,6 +17,7 @@ from .embedding_manager import get_embedding_manager
 from .async_handler import get_async_handler, ConcurrentSearchProcessor
 from .performance_monitor import get_profiler, BottleneckDetector, track_endpoint_performance, profile
 from .system_tuner import get_system_tuner, auto_tune_system, optimize_for_search
+from .monitoring import monitoring_middleware, monitor_search, get_metrics, health_check as monitoring_health
 
 # Configure logging
 logging.basicConfig(
@@ -40,21 +42,8 @@ profiler = get_profiler()
 bottleneck_detector = BottleneckDetector(profiler)
 system_tuner = get_system_tuner(profiler)
 
-# Request logging middleware
-@app.middleware("http")
-async def log_requests(request: Request, call_next):
-    correlation_id = str(uuid.uuid4())
-    request.state.correlation_id = correlation_id
-    
-    start_time = time.time()
-    logger.info(f"[{correlation_id}] {request.method} {request.url}")
-    
-    response = await call_next(request)
-    
-    process_time = time.time() - start_time
-    logger.info(f"[{correlation_id}] {response.status_code} - {process_time:.3f}s")
-    
-    return response
+# Add monitoring middleware
+app.middleware("http")(monitoring_middleware)
 
 # Configure CORS
 app.add_middleware(
@@ -165,6 +154,7 @@ def deduplicate_results(results: List[Dict], threshold: float = 0.9) -> List[Dic
 api_router = APIRouter(prefix="/api/v1")
 
 @api_router.post("/search", response_model=SearchResponse)
+@monitor_search("semantic")
 async def search_transcripts(request: SearchRequest, http_request: Request):
     """Search transcript chunks using natural language queries"""
     correlation_id = getattr(http_request.state, 'correlation_id', 'unknown')
@@ -243,6 +233,7 @@ async def search_transcripts(request: SearchRequest, http_request: Request):
         raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
 
 @api_router.post("/search/simple", response_model=SearchResponse)
+@monitor_search("simple")
 async def simple_search(request: SearchRequest, http_request: Request):
     """
     Simple direct semantic search optimized for long natural language questions.
@@ -364,6 +355,16 @@ async def system_metrics():
         "timestamp": datetime.now().isoformat()
     }
 
+@api_router.get("/metrics/prometheus")
+async def prometheus_metrics():
+    """Get Prometheus metrics"""
+    return get_metrics()
+
+@api_router.get("/health/monitoring")
+async def monitoring_health():
+    """Enhanced health check with monitoring metrics"""
+    return monitoring_health()
+
 @api_router.delete("/cache")
 async def clear_cache():
     """Clear all cached data"""
@@ -463,6 +464,7 @@ async def tune_index_parameters(target_recall: float = 0.9):
         raise HTTPException(status_code=500, detail=f"Tuning failed: {str(e)}")
 
 @api_router.post("/search/batch")
+@monitor_search("batch")
 async def batch_search(request: BatchSearchRequest, http_request: Request):
     """Process multiple search queries concurrently"""
     correlation_id = getattr(http_request.state, 'correlation_id', 'unknown')

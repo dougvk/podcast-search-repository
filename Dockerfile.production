@@ -1,0 +1,78 @@
+# Production-Optimized Multi-Stage Dockerfile for FastAPI + AI/ML
+# Handles complex ML dependencies with ARM64 compatibility
+
+# Stage 1: Build Dependencies  
+FROM python:3.11-slim AS builder
+
+# Security: Create non-root user
+RUN groupadd -r appuser && useradd -r -g appuser appuser
+
+WORKDIR /build
+
+# Install build dependencies for ML packages
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    git \
+    gcc \
+    g++ \
+    libblas-dev \
+    liblapack-dev \
+    gfortran \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements and create clean version
+COPY requirements.txt .
+
+# Create production-only requirements (exclude development dependencies)
+RUN grep -E '^(fastapi|uvicorn|pydantic|python-multipart|python-dotenv|memvid|numpy|pillow|sentence-transformers|torch|torchvision|transformers|faiss-cpu|pandas|h5py|pyyaml|loguru|click|jinja2|starlette|aiofiles|redis)' requirements.txt > requirements-prod.txt
+
+# Install Python dependencies to user directory
+RUN pip install --user --no-cache-dir --upgrade pip setuptools wheel && \
+    pip install --user --no-cache-dir -r requirements-prod.txt
+
+# Stage 2: Production Runtime
+FROM python:3.11-slim AS production
+
+# Security: Create matching user
+RUN groupadd -r appuser && useradd -r -g appuser appuser
+
+# Install only essential runtime dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    libgomp1 \
+    libblas3 \
+    liblapack3 \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get purge -y --auto-remove
+
+# Copy Python packages from builder
+COPY --from=builder /root/.local /home/appuser/.local
+
+# Set up application
+WORKDIR /app
+COPY --chown=appuser:appuser . .
+
+# Create data directories
+RUN mkdir -p data/{raw_transcripts,processed,video_libraries,indexes} logs && \
+    chown -R appuser:appuser /app
+
+# Security: Switch to non-root user
+USER appuser
+
+# Environment configuration
+ENV PATH=/home/appuser/.local/bin:$PATH \
+    PYTHONPATH=/app \
+    PYTHONUNBUFFERED=1 \
+    ENVIRONMENT=production \
+    OMP_NUM_THREADS=1
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+# Expose port
+EXPOSE 8000
+
+# Production command
+CMD ["python", "-m", "uvicorn", "core.search_api:app", \
+     "--host", "0.0.0.0", "--port", "8000", "--workers", "1"] 

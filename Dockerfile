@@ -1,44 +1,45 @@
-# Dockerfile for Podcast Search Repository
+# Production-Ready Docker Image for FastAPI + AI/ML
+FROM python:3.11-slim
 
-FROM python:3.9-slim
+# Create non-root user for security
+RUN groupadd -r appuser && useradd -r -g appuser appuser
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    build-essential \
+    libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    curl \
-    git \
-    libgl1-mesa-glx \
-    libglib2.0-0 \
-    libsm6 \
-    libxext6 \
-    libxrender-dev \
-    libgomp1 \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy requirements first for better caching
+# Copy requirements and install Python dependencies
 COPY requirements.txt .
-
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
-COPY . .
+COPY --chown=appuser:appuser . .
 
 # Create necessary directories
-RUN mkdir -p data/raw_transcripts data/processed data/video_libraries data/indexes logs
+RUN mkdir -p data/{raw_transcripts,processed,video_libraries,indexes} logs && \
+    chown -R appuser:appuser /app
 
-# Set permissions
-RUN chmod +x scripts/*.py || true
+# Switch to non-root user
+USER appuser
 
-# Expose ports
-EXPOSE 8000 8080
+# Environment configuration
+ENV PYTHONPATH=/app \
+    PYTHONUNBUFFERED=1 \
+    ENVIRONMENT=production
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-# Default command
-CMD ["python", "-m", "uvicorn", "api.search_api:app", "--host", "0.0.0.0", "--port", "8000"]
+# Expose port
+EXPOSE 8000
+
+# Production command
+CMD ["python", "-m", "uvicorn", "core.search_api:app", "--host", "0.0.0.0", "--port", "8000"] 
