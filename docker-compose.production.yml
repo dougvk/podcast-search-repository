@@ -1,0 +1,40 @@
+version: '3.8'
+
+services:
+  transcription-search-universal:
+    build:
+      context: .
+      dockerfile: Dockerfile.production
+    container_name: transcription-search-universal
+    ports:
+      - "8000:8000"
+    volumes:
+      # Mount all podcast episodes (read-only)
+      - ./podcast/downloads:/app/podcast/downloads:ro
+      # Optionally mount custom selectors
+      - ./selectors:/app/selectors:ro
+      # Persist data and state
+      - transcription_data:/app/data
+    environment:
+      # Choose your selector script
+      - SELECTOR_SCRIPT=selectors/test_selector.py
+      # Or use: selectors/churchill_episodes.py
+      # Performance settings
+      - PYTHONUNBUFFERED=1
+      - MAX_MEMORY_MB=1024
+      - OMP_NUM_THREADS=2
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  transcription_data: 

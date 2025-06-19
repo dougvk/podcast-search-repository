@@ -18,10 +18,11 @@ from .async_handler import get_async_handler, ConcurrentSearchProcessor
 from .performance_monitor import get_profiler, BottleneckDetector, track_endpoint_performance, profile
 from .system_tuner import get_system_tuner, auto_tune_system, optimize_for_search
 from .monitoring import monitoring_middleware, monitor_search, get_metrics, health_check as monitoring_health
+import json
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger("transcript-search")
@@ -110,22 +111,126 @@ class ErrorResponse(BaseModel):
     error: str = Field(..., description="Error message")
     detail: Optional[str] = Field(None, description="Detailed error information")
 
-# Global search engine instance
+# Global variables
 retriever = None
+episode_mapping = {}
+
+def load_episode_mapping():
+    """Load episode mapping if available"""
+    global episode_mapping
+    
+    # Use the same project root logic as initialize_search_engine
+    project_root = Path(__file__).parent.parent
+    mapping_file = project_root / "data" / "episode_mapping.json"
+    
+    logger.info(f"Looking for episode mapping at: {mapping_file.absolute()}")
+    if mapping_file.exists():
+        try:
+            with open(mapping_file, 'r') as f:
+                episode_mapping = json.load(f)
+            logger.info(f"✅ Loaded episode mapping with {len(episode_mapping)} entries")
+        except Exception as e:
+            logger.warning(f"Failed to load episode mapping: {e}")
+            episode_mapping = {}
+    else:
+        logger.warning(f"❌ No episode mapping found at {mapping_file.absolute()} - using generic metadata")
+
+def extract_frame_from_text(text):
+    """Extract frame number by looking up text in memvid index"""
+    try:
+        # Use the same project root logic
+        project_root = Path(__file__).parent.parent
+        index_file = project_root / "data" / "podcast_batch_001_index.json"
+        
+        logger.debug(f"Looking for index at: {index_file.absolute()}")
+        if index_file.exists():
+            with open(index_file, 'r') as f:
+                index_data = json.load(f)
+            
+            # Search for matching text in index metadata
+            if 'metadata' in index_data:
+                for item in index_data['metadata']:
+                    if item.get('text', '').strip().startswith(text.strip()[:100]):
+                        frame = item.get('frame', 0)
+                        logger.debug(f"Frame extracted: {frame} for text: {text[:50]}...")
+                        return frame
+        logger.debug(f"No frame found for text: {text[:50]}...")
+        return 0
+    except Exception as e:
+        logger.warning(f"Error extracting frame: {e}")
+        return 0
+
+def get_episode_metadata(frame_number):
+    """Get episode metadata for a frame number"""
+    logger.debug(f"Getting episode metadata for frame {frame_number}, mapping has {len(episode_mapping)} entries")
+    
+    if not episode_mapping:
+        logger.debug("No episode mapping available - returning generic metadata")
+        return EpisodeMetadata(
+            filename="transcript.txt",
+            title=None,
+            speaker=None,
+            timestamp=None
+        )
+    
+    # Try exact frame match first, then approximate
+    episode_data = episode_mapping.get(str(frame_number))
+    if not episode_data:
+        # Find closest frame (simple fallback)
+        frame_keys = [int(k) for k in episode_mapping.keys() if k.isdigit()]
+        if frame_keys:
+            closest_frame = min(frame_keys, key=lambda x: abs(x - frame_number))
+            episode_data = episode_mapping.get(str(closest_frame))
+            logger.debug(f"Used closest frame {closest_frame} for requested frame {frame_number}")
+    
+    if episode_data:
+        logger.debug(f"Found episode data: {episode_data.get('title', 'Unknown')}")
+        return EpisodeMetadata(
+            filename=episode_data.get("filename", "transcript.txt"),
+            title=episode_data.get("title"),
+            speaker=episode_data.get("speaker"),
+            timestamp=episode_data.get("timestamp")
+        )
+    
+    # Fallback to generic
+    logger.debug(f"No episode data found for frame {frame_number} - returning generic metadata")
+    return EpisodeMetadata(
+        filename="transcript.txt",
+        title=None,
+        speaker=None,
+        timestamp=None
+    )
 
 def initialize_search_engine():
     """Initialize the search engine with available data"""
     global retriever
-    data_dir = Path("data")
+    
+    # Determine the correct project root directory
+    project_root = Path(__file__).parent.parent
+    data_dir = project_root / "data"
+    
+    logger.info(f"Initializing search engine with data directory: {data_dir.absolute()}")
     
     # Look for memvid files
     video_files = list(data_dir.glob("*.mp4")) + list(data_dir.glob("*.avi"))
     if video_files:
         video_file = video_files[0]
-        index_file = video_file.with_suffix("_index.json")
+        # Fix: Look for _index.json files that match the video basename
+        base_name = video_file.stem
+        index_file = data_dir / f"{base_name}_index.json"
+        
+        logger.info(f"Found video: {video_file}")
+        logger.info(f"Looking for index: {index_file}")
+        
         if index_file.exists():
             retriever = MemvidRetriever(str(video_file), str(index_file))
+            load_episode_mapping()  # **NEW: Load episode mapping**
+            logger.info("✅ Search engine initialized successfully")
             return True
+        else:
+            logger.warning(f"Index file not found: {index_file}")
+    else:
+        logger.warning(f"No video files found in: {data_dir}")
     return False
 
 def deduplicate_results(results: List[Dict], threshold: float = 0.9) -> List[Dict]:
@@ -182,15 +287,21 @@ async def search_transcripts(request: SearchRequest, http_request: Request):
             
             # Convert to our format and filter by threshold
             formatted_results = []
-            for text, score in raw_results:
+            for result in raw_results:
+                # Handle memvid results which are just text strings
+                if isinstance(result, str):
+                    text = result
+                    score = 1.0  # Default score since memvid doesn't return scores
+                    # **NEW: Extract frame number from memvid index by matching text**
+                    frame_number = extract_frame_from_text(text)
+                else:
+                    # Handle tuple format (text, score) if memvid changes
+                    text, score = result
+                    frame_number = extract_frame_from_text(text)
+                
                 if score >= request.threshold:
-                    # Extract episode metadata (simplified)
-                    episode_meta = EpisodeMetadata(
-                        filename="transcript.txt",  # Default for now
-                        title=None,
-                        speaker=None,
-                        timestamp=None
-                    )
+                    # **NEW: Get actual episode metadata using frame number**
+                    episode_meta = get_episode_metadata(frame_number)
                     
                     formatted_results.append({
                         'text': text,
@@ -255,14 +366,23 @@ async def simple_search(request: SearchRequest, http_request: Request):
         
         # Convert to our format
         formatted_results = []
-        for text, score in raw_results:
+        for result in raw_results:
+            # Handle memvid results which are just text strings
+            if isinstance(result, str):
+                text = result
+                score = 1.0  # Default score since memvid doesn't return scores
+            else:
+                # Handle tuple format if it exists
+                try:
+                    text, score = result
+                except (ValueError, TypeError):
+                    text = str(result)
+                    score = 1.0
+            
             if score >= request.threshold:
-                episode_meta = EpisodeMetadata(
-                    filename="transcript.txt",
-                    title=None,
-                    speaker=None,
-                    timestamp=None
-                )
+                # **NEW: Get actual episode metadata for simple search too**
+                frame_number = extract_frame_from_text(text)
+                episode_meta = get_episode_metadata(frame_number)
                 
                 formatted_results.append({
                     'text': text,
@@ -320,10 +440,29 @@ async def liveness_probe():
     """Liveness probe for Kubernetes"""
     return {"status": "alive"}
 
+@api_router.get("/debug/paths")
+async def debug_paths():
+    """Debug endpoint to check file paths"""
+    project_root = Path(__file__).parent.parent
+    data_dir = project_root / "data"
+    
+    return {
+        "timestamp": datetime.now().isoformat(),
+        "__file__": str(Path(__file__).absolute()),
+        "project_root": str(project_root.absolute()),
+        "current_working_dir": str(Path.cwd()),
+        "data_directory": str(data_dir.absolute()),
+        "episode_mapping_exists": (project_root / "data" / "episode_mapping.json").exists(),
+        "episode_mapping_size": len(episode_mapping),
+        "index_exists": (project_root / "data" / "podcast_batch_001_index.json").exists(),
+    }
+
 @api_router.get("/info")
 async def system_info():
     """System information endpoint"""
-    data_dir = Path("data")
+    # Use the same project root logic
+    project_root = Path(__file__).parent.parent
+    data_dir = project_root / "data"
     video_files = list(data_dir.glob("*.mp4")) + list(data_dir.glob("*.avi"))
     
     return {
@@ -331,7 +470,14 @@ async def system_info():
         "version": "1.0.0",
         "search_engine_initialized": retriever is not None,
         "available_videos": len(video_files),
-        "data_directory": str(data_dir.absolute())
+        "data_directory": str(data_dir.absolute()),
+        "debug_info": {
+            "__file__": str(Path(__file__).absolute()),
+            "project_root": str(project_root.absolute()),
+            "current_working_dir": str(Path.cwd()),
+            "episode_mapping_exists": (project_root / "data" / "episode_mapping.json").exists(),
+            "episode_mapping_size": len(episode_mapping),
+        }
     }
 
 @api_router.get("/ready")

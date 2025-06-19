@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  transcription-search-20:
+    image: transcription-search:prod-test
+    container_name: transcription-search-20-episodes
+    ports:
+      - "8003:8002"
+    volumes:
+      # Mount the 20-episode data
+      - ./data:/app/data:ro
+      # Mount the 20-episode API
+      - ./search_api_20_episodes.py:/app/search_api_20_episodes.py:ro
+    environment:
+      - ENVIRONMENT=production
+      - PYTHONPATH=/app
+      - PYTHONUNBUFFERED=1
+      - MAX_MEMORY_MB=1024
+      - OMP_NUM_THREADS=2
+    # Use the 20-episode API instead of the default
+    command: ["python", "/app/search_api_20_episodes.py"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+    mem_limit: 2g
+    cpus: 1.0 

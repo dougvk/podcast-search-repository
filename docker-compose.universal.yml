@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  transcription-search:
+    build:
+      context: .
+      dockerfile: Dockerfile.universal
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./podcast/downloads:/app/podcast/downloads:ro
+    environment:
+      - SELECTOR_SCRIPT=selectors/random_20.py
+    restart: unless-stopped 

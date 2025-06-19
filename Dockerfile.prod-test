@@ -1,0 +1,102 @@
+# Production-Style Dockerfile for Testing (10 Episodes)
+# Based on Dockerfile.production but optimized for quick testing
+
+# Stage 1: Build Dependencies  
+FROM python:3.11-slim AS builder
+
+# Security: Create non-root user
+RUN groupadd -r appuser && useradd -r -g appuser appuser
+
+WORKDIR /build
+
+# Install build dependencies for ML packages
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    git \
+    gcc \
+    g++ \
+    libblas-dev \
+    liblapack-dev \
+    gfortran \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements and create test version
+COPY requirements.txt .
+
+# Install Python dependencies to user directory (test-optimized selection)
+RUN pip install --user --no-cache-dir --upgrade pip setuptools wheel && \
+    pip install --user --no-cache-dir \
+    fastapi==0.104.1 \
+    uvicorn[standard]==0.24.0 \
+    pydantic==2.5.0 \
+    python-multipart==0.0.6 \
+    python-dotenv==1.0.0 \
+    huggingface_hub==0.17.3 \
+    memvid==0.1.3 \
+    opencv-python==4.8.1.78 \
+    numpy==1.24.3 \
+    pillow==10.1.0 \
+    sentence-transformers==2.2.2 \
+    torch==2.1.1 \
+    torchvision==0.16.1 \
+    transformers==4.35.2 \
+    faiss-cpu==1.7.4 \
+    loguru==0.7.2 \
+    requests==2.31.0 \
+    aiofiles==23.2.1 \
+    psutil==5.9.6 \
+    prometheus-client==0.19.0
+
+# Stage 2: Production Runtime (Test Mode)
+FROM python:3.11-slim AS production
+
+# Security: Create matching user
+RUN groupadd -r appuser && useradd -r -g appuser appuser
+
+# Install only essential runtime dependencies (including OpenCV deps)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    libgomp1 \
+    libblas3 \
+    liblapack3 \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender-dev \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get purge -y --auto-remove
+
+# Copy Python packages from builder
+COPY --from=builder /root/.local /home/appuser/.local
+
+# Set up application
+WORKDIR /app
+COPY --chown=appuser:appuser . .
+
+# Create data directories and cache directory for HuggingFace models
+RUN mkdir -p data temp_podcasts podcast/downloads logs && \
+    mkdir -p /home/appuser/.cache && \
+    chown -R appuser:appuser /app /home/appuser/.cache
+
+# Security: Switch to non-root user
+USER appuser
+
+# Environment configuration (test-optimized)
+ENV PATH=/home/appuser/.local/bin:$PATH \
+    PYTHONPATH=/app \
+    PYTHONUNBUFFERED=1 \
+    ENVIRONMENT=test \
+    MAX_MEMORY_MB=512 \
+    BATCH_SIZE=10 \
+    OMP_NUM_THREADS=1
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:8000/api/v1/health || exit 1
+
+# Expose port
+EXPOSE 8000
+
+# Test command: Process 10 episodes then start API
+CMD ["sh", "-c", "python process_podcasts.py && python -m uvicorn core.search_api:app --host 0.0.0.0 --port 8000"] 

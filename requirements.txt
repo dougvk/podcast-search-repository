@@ -13,11 +13,12 @@ opencv-python==4.8.1.78  # Video encoding/decoding for storage
 numpy==1.24.3            # Numerical operations for video processing
 pillow==10.1.0           # Image processing support
 
-# Machine Learning and Embeddings
-sentence-transformers==2.2.2  # Semantic embeddings for search
+# Machine Learning and Embeddings (using older compatible versions)
+sentence-transformers==2.2.2  # Minimum version required by memvid
 torch==2.1.1             # PyTorch backend for transformers
 torchvision==0.16.1      # Vision utilities for torch
-transformers==4.35.2     # Hugging Face transformers library
+transformers==4.25.1     # Older compatible transformers version
+huggingface-hub==0.11.1  # Older version that still has cached_download
 
 # Vector Search and Similarity
 faiss-cpu==1.7.4         # Facebook AI Similarity Search (CPU version)
@@ -62,7 +63,6 @@ psutil==5.9.6            # System and process monitoring
 memory-profiler==0.61.0  # Memory usage profiling
 line-profiler==4.1.1     # Line-by-line profiling
 prometheus-client==0.19.0 # Prometheus metrics client
-loguru==0.7.2            # Structured JSON logging (already included above)
 
 # HTTP and API Tools
 httpx==0.25.2            # Async HTTP client
@@ -79,8 +79,8 @@ docker==6.1.3            # Docker integration
 supervisor==4.2.5        # Process management
 
 # Security
-cryptography==41.0.8     # Cryptographic operations
-python-jose[cryptography]==3.3.0  # JWT token handling
+cryptography>=41.0.0     # Cryptographic operations
+# python-jose[cryptography]==3.3.0  # JWT token handling - removed for Docker compatibility
 
 # Optional: GPU Acceleration
 # cupy-cuda11x==12.3.0   # GPU-accelerated NumPy (CUDA 11.x)
@@ -102,9 +102,4 @@ seaborn==0.13.0          # Statistical visualization
 
 # Version Constraints for Compatibility
 # Ensure compatibility between major packages
-torch>=1.13.0,<2.2.0
-transformers>=4.30.0,<5.0.0
-sentence-transformers>=2.2.0,<3.0.0
-faiss-cpu>=1.7.0,<2.0.0
-numpy>=1.21.0,<2.0.0
-pandas>=1.5.0,<3.0.0
+# Note: Using specific working versions above, constraints removed to avoid conflicts

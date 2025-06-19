@@ -75,4 +75,51 @@ EXPOSE 8000
 
 # Production command
 CMD ["python", "-m", "uvicorn", "core.search_api:app", \
-     "--host", "0.0.0.0", "--port", "8000", "--workers", "1"] 
+     "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+
+FROM python:3.11-slim as base
+
+# Install system dependencies including build tools
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    curl \
+    gcc \
+    g++ \
+    python3-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy requirements first for better caching
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy core application files
+COPY core/ ./core/
+COPY universal_processor.py .
+COPY universal_api.py .
+COPY run_universal.sh .
+
+# Copy default selectors
+COPY selectors/ ./selectors/
+
+# Make scripts executable
+RUN chmod +x run_universal.sh
+
+# Create data directories
+RUN mkdir -p data/temp_selected data/state
+
+# Environment variables
+ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
+ENV SELECTOR_SCRIPT=selectors/random_20.py
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+  CMD curl -f http://localhost:8000/health || exit 1
+
+# Expose port
+EXPOSE 8000
+
+# Default command runs the universal pipeline
+CMD ["./run_universal.sh"] 

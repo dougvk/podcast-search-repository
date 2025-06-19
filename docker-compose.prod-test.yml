@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  transcription-search:
+    image: transcription-search:prod-test
+    container_name: transcription-search-prod-test
+    ports:
+      - "8000:8000"
+    volumes:
+      # Mount our existing data directory with episode metadata
+      - ./data:/app/data:ro
+    environment:
+      - ENVIRONMENT=production
+      - PYTHONPATH=/app
+      - PYTHONUNBUFFERED=1
+      - MAX_MEMORY_MB=512
+      - OMP_NUM_THREADS=1
+    # Override the default command to skip processing and just start the API
+    command: ["python", "-m", "uvicorn", "core.search_api:app", "--host", "0.0.0.0", "--port", "8000"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+    user: appuser
+    
+networks:
+  default:
+    name: transcription-network 

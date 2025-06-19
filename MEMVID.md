@@ -128,7 +128,7 @@ config = {
 }
 encoder = MemvidEncoder(config=config)
 
-# Add text files  
+# Add text files
 for file in os.listdir("documents"):
     with open(f"documents/{file}", "r") as f:
         encoder.add_text(f.read())
